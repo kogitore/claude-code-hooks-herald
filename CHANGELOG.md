@@ -10,6 +10,7 @@ Commit messages are recommended to follow [Conventional Commits](https://www.con
 - Audio layering and custom sound file support
 - More platform audio backends (PulseAudio, ALSA)
 - Established bilingual `/updates` document structure and index
+- Documented uv and system audio prerequisites in the README set
 
 ### Changed
 - Tuned default volume and throttling strategy

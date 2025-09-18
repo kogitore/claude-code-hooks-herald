@@ -24,10 +24,23 @@ A collection of audio enhancement hooks for Claude Code that provides sound feed
 
 This project requires no complex installation. The minimal steps to get started are:
 
-1.  **Provide Sound Files:** Place your `.wav` audio files inside the `.claude/sounds/` directory.
-2.  **Name Them Correctly:** Ensure the filenames match those expected by the configuration (e.g., `user_prompt.wav`, `task_complete.wav`).
+1.  **Install uv (recommended):** This project uses [uv](https://docs.astral.sh/uv/) for fast Python script execution. Install it via:
+    ```bash
+    curl -LsSf https://astral.sh/install.sh | sh
+    ```
+    Alternatively, you can use `python3` directly instead of `uv run` in all commands below.
+
+2.  **Provide Sound Files:** Place your `.wav` audio files inside the `.claude/sounds/` directory.
+
+3.  **Name Them Correctly:** Ensure the filenames match those expected by the configuration (e.g., `user_prompt.wav`, `task_complete.wav`).
 
 That's it! The hooks will automatically pick up the sounds. For more advanced changes, see the configuration details below.
+
+## Requirements
+
+- **Python 3.10+** (the hooks only use the standard library).
+- **[uv](https://docs.astral.sh/uv/)** for running the provided commands without activating a virtual environment. Install via `curl -LsSf https://astral.sh/install.sh | sh` or check the uv docs for platform-specific instructions. If you prefer not to install uv, replace `uv run ...` with `python3 .claude/hooks/<script>.py ...`.
+- **System audio utilities**: macOS ships with `afplay`; Linux requires either `ffplay` (from FFmpeg) or `aplay` (from ALSA); Windows relies on the built-in `winsound` module.
 
 ## Configuration
 
@@ -103,18 +116,25 @@ export CLAUDE_SOUNDS_DIR="/absolute/path/to/sounds"
 
 - Notification (play sound):
 
+
 ```
 echo '{}' | uv run .claude/hooks/notification.py --enable-audio
+# or
+echo '{}' | python3 .claude/hooks/notification.py --enable-audio
 ```
 
 - Task complete (play sound):
 
 ```
 echo '{}' | uv run .claude/hooks/stop.py --enable-audio
+# or
+echo '{}' | python3 .claude/hooks/stop.py --enable-audio
 ```
 
 - Subagent complete (play sound):
 
 ```
 echo '{}' | uv run .claude/hooks/subagent_stop.py --enable-audio
+# or
+echo '{}' | python3 .claude/hooks/subagent_stop.py --enable-audio
 ```

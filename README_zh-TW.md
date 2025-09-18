@@ -24,10 +24,23 @@
 
 本專案無需複雜安裝，最精簡的啟用步驟如下：
 
-1.  **提供音效檔**：將您的 `.wav` 音效檔放入 `.claude/sounds/` 資料夾中。
-2.  **正確命名**：確保檔案名稱與設定中所預期的名稱相符（例如 `user_prompt.wav`, `task_complete.wav`）。
+1.  **安裝 uv（建議）**：本專案使用 [uv](https://docs.astral.sh/uv/) 來快速執行 Python 腳本。透過以下指令安裝：
+    ```bash
+    curl -LsSf https://astral.sh/install.sh | sh
+    ```
+    或者，您也可以在下方所有指令中將 `uv run` 替換為 `python3`。
+
+2.  **提供音效檔**：將您的 `.wav` 音效檔放入 `.claude/sounds/` 資料夾中。
+
+3.  **正確命名**：確保檔案名稱與設定中所預期的名稱相符（例如 `user_prompt.wav`, `task_complete.wav`）。
 
 這樣就完成了！掛鉤系統將會自動偵測並播放音效。如需進階修改，請參考下方的設定說明。
+
+## 前置需求
+
+- **Python 3.10 以上**：目前程式僅使用標準函式庫。
+- **[uv](https://docs.astral.sh/uv/)**：本文件中的指令預設透過 uv 直接執行腳本，可用 `curl -LsSf https://astral.sh/install.sh | sh` 安裝；若不想安裝 uv，可將指令改為 `python3 .claude/hooks/<script>.py ...`。
+- **系統音效工具**：macOS 內建 `afplay`；Linux 需預先安裝 `ffplay`（FFmpeg）或 `aplay`（ALSA）；Windows 使用內建的 `winsound` 模組。
 
 ## 設定
 
@@ -105,16 +118,22 @@ export CLAUDE_SOUNDS_DIR="/absolute/path/to/sounds"
 
 ```
 echo '{}' | uv run .claude/hooks/notification.py --enable-audio
+# 或
+echo '{}' | python3 .claude/hooks/notification.py --enable-audio
 ```
 
 - 任務完成（啟用音效）：
 
 ```
 echo '{}' | uv run .claude/hooks/stop.py --enable-audio
+# 或
+echo '{}' | python3 .claude/hooks/stop.py --enable-audio
 ```
 
 - 子代理完成（啟用音效）：
 
 ```
 echo '{}' | uv run .claude/hooks/subagent_stop.py --enable-audio
+# 或
+echo '{}' | python3 .claude/hooks/subagent_stop.py --enable-audio
 ```

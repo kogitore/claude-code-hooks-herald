@@ -146,7 +146,7 @@ export AUDIO_PLAYER_CMD="custom_player"
 export AUDIO_PLAYER_ARGS="--volume 0.5"
 
 # 自定義音訊目錄
-export CLAUDE_SOUNDS_DIR="/custom/sounds/path"
+export CLAUDE_SOUNDS_DIR="/custom/.claude/sounds/path"
 ```
 
 ### 升級路徑

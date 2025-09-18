@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/notification.py --enable-audio"
+            "command": "cd $CLAUDE_PROJECT_DIR && uv run .claude/hooks/notification.py --enable-audio"
           }
         ]
       }
@@ -17,7 +17,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/stop.py --enable-audio"
+            "command": "cd $CLAUDE_PROJECT_DIR && uv run .claude/hooks/stop.py --enable-audio"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd $CLAUDE_PROJECT_DIR && uv run .claude/hooks/subagent_stop.py --enable-audio"
           }
         ]
       }

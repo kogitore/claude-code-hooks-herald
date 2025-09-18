@@ -8,7 +8,7 @@ A pure-Python approach can deliver per-hook volume control on Windows without to
 ## Setup
 - Platform: Windows 11 (22H2)
 - Python: 3.11 with standard library only
-- Test audio: 2–3 second WAV samples shipped in `sounds/`
+- Test audio: 2–3 second WAV samples shipped in `.claude/sounds/`
 - Environment override: `AUDIO_PLAYER_CMD` unset to force real playback
 
 ## Procedure
