@@ -1,0 +1,15 @@
+{
+  "sound_files": {
+    "base_path": "./.claude/sounds",
+    "mappings": {
+      "stop": "task_complete.wav",
+      "agent_stop": "agent_complete.wav",
+      "subagent_stop": "agent_complete.wav",
+      "user_notification": "user_prompt.wav"
+    }
+  },
+  "audio_settings": {
+    "volume": 0.2
+  }
+}
+

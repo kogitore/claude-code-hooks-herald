@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""
+Minimal Audio Manager for Claude Code Hooks (pure local audio files)
+
+- No TTS/LLM, no network calls
+- Uses system audio players when available (afplay/ffplay/aplay)
+- Paths simplified: repo root is assumed at Path(__file__).parents[3]
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from dataclasses import dataclass
+import time
+from pathlib import Path
+from typing import Dict, Optional, List, Tuple
+
+
+def _load_config(config_path: Path) -> Dict:
+    try:
+        if config_path.exists():
+            return json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _which(cmd: str) -> Optional[str]:
+    from shutil import which
+
+    return which(cmd)
+
+
+def _play_with(cmd: str, args: list[str], timeout_s: float = 5.0) -> int:
+    try:
+        p = subprocess.run([cmd] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout_s)
+        return p.returncode
+    except Exception:
+        return 1
+
+
+@dataclass
+class AudioConfig:
+    base_path: Path
+    mappings: Dict[str, str]
+
+
+class AudioManager:
+    def __init__(self):
+        here_path = Path(__file__).resolve()
+        # Project root is three levels up: utils -> hooks -> .claude -> <root>
+        repo_root = here_path.parents[3]
+
+        # 1) ENV override (highest priority)
+        env_dir = os.getenv("CLAUDE_SOUNDS_DIR") or os.getenv("AUDIO_SOUNDS_DIR")
+        sounds_dir = Path(env_dir).expanduser() if env_dir else None
+        if sounds_dir and not sounds_dir.is_absolute():
+            sounds_dir = repo_root / sounds_dir
+
+        # Load config early
+        cfg = _load_config(here_path.parent / "audio_config.json")
+
+        # 2) Config base_path if ENV not set
+        if not sounds_dir:
+            try:
+                base = cfg.get("sound_files", {}).get("base_path")
+                if isinstance(base, str):
+                    base_path = Path(base)
+                    sounds_dir = base_path if base_path.is_absolute() else (repo_root / base_path)
+            except Exception:
+                sounds_dir = None
+
+        # 3) Default path relative to repo root
+        if not sounds_dir:
+            sounds_dir = repo_root / ".claude" / "sounds"
+
+        # Defaults (new, more descriptive keys)
+        mappings = {
+            "stop": "task_complete.wav",
+            "agent_stop": "agent_complete.wav",
+            "user_notification": "user_prompt.wav",
+        }
+
+        # Optional config override (config wins over defaults)
+        volume = 0.2
+        try:
+            m = cfg.get("sound_files", {}).get("mappings", {})
+            if isinstance(m, dict):
+                mappings.update({k: str(v) for k, v in m.items()})
+            vol = cfg.get("audio_settings", {}).get("volume")
+            if isinstance(vol, (int, float)):
+                volume = max(0.0, min(1.0, float(vol)))
+        except Exception:
+            pass
+
+        self.config = AudioConfig(base_path=sounds_dir, mappings=mappings)
+        self.volume = volume
+
+        # Throttle store under repo_root/logs
+        self._throttle_path = repo_root / "logs" / "audio_throttle.json"
+        try:
+            self._throttle_path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        # Player selection & timeout
+        self._timeout_s = float(os.getenv("AUDIO_PLAYER_TIMEOUT", "5"))
+        self._player_cmd, self._player_base_args = self._select_player()
+
+    def _select_player(self) -> Tuple[Optional[str], List[str]]:
+        # ENV override first
+        cmd = os.getenv("AUDIO_PLAYER_CMD")
+        base_args = os.getenv("AUDIO_PLAYER_ARGS", "").split() if os.getenv("AUDIO_PLAYER_ARGS") else []
+        if cmd:
+            return cmd, base_args
+        # Auto-detect
+        if _which("afplay"):
+            args: List[str] = ["-v", f"{self.volume:.3f}"]
+            return "afplay", args
+        if _which("ffplay"):
+            args = ["-nodisp", "-autoexit", "-loglevel", "error", "-volume", str(int(round(self.volume * 100)))]
+            return "ffplay", args
+        if _which("aplay"):
+            return "aplay", []  # aplay doesn't support volume uniformly
+        return None, []
+
+    def resolve_file(self, audio_type: str) -> Optional[Path]:
+        # Only accept canonical keys; with one intentional fallback:
+        # 'subagent_stop' falls back to 'agent_stop' if not configured.
+        name = self.config.mappings.get(audio_type)
+        if name is None and audio_type == "subagent_stop":
+            name = self.config.mappings.get("agent_stop")
+        if not name:
+            return None
+        p = self.config.base_path / str(name)
+        return p if p.exists() else None
+
+    def play_audio(self, audio_type: str, enabled: bool = False) -> tuple[bool, Optional[Path]]:
+        """Attempt to play local audio. Returns (played, path).
+
+        - If not enabled or file missing, returns (False, maybe_path)
+        - Does not raise on failure
+        """
+        path = self.resolve_file(audio_type)
+        if not enabled or path is None:
+            return False, path
+
+        # Use cached player
+        if self._player_cmd:
+            rc = _play_with(self._player_cmd, self._player_base_args + [str(path)], timeout_s=self._timeout_s)
+            return (rc == 0), path
+        return False, path
+
+    # --- Throttling helpers -------------------------------------------------
+    def _read_throttle(self) -> Dict[str, float]:
+        try:
+            if self._throttle_path.exists():
+                txt = self._throttle_path.read_text(encoding="utf-8")
+                data = json.loads(txt)
+                if isinstance(data, dict):
+                    # ensure float values
+                    return {str(k): float(v) for k, v in data.items()}
+        except Exception:
+            # Corrupted file: reset empty
+            try:
+                self._throttle_path.write_text("{}", encoding="utf-8")
+            except Exception:
+                pass
+        return {}
+
+    def _write_throttle(self, data: Dict[str, float]) -> None:
+        try:
+            # Best-effort advisory lock (POSIX); ignore on platforms lacking fcntl
+            try:
+                import fcntl  # type: ignore
+            except Exception:
+                fcntl = None
+            tmp = self._throttle_path.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                if fcntl:
+                    try:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                    except Exception:
+                        pass
+                f.write(json.dumps(data))
+                try:
+                    if fcntl:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                except Exception:
+                    pass
+            os.replace(tmp, self._throttle_path)
+        except Exception:
+            pass
+
+    def should_throttle(self, key: str, window_seconds: int, now: Optional[float] = None) -> bool:
+        """Return True if an event with `key` should be throttled.
+
+        Does not update the last-fired time. Call `mark_emitted` after actually acting.
+        """
+        now = now or time.time()
+        data = self._read_throttle()
+        last = float(data.get(key, 0))
+        return (now - last) < float(window_seconds)
+
+    def mark_emitted(self, key: str, when: Optional[float] = None) -> None:
+        when = when or time.time()
+        data = self._read_throttle()
+        data[str(key)] = float(when)
+        self._write_throttle(data)
+

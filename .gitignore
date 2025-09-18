@@ -1,0 +1,55 @@
+# Local Agent Configs
+AGENTS.md
+CLAUDE.md
+
+# IDE
+.vscode/
+.idea/
+.ropeproject/
+.code/
+*.swp
+*.swo
+
+# Audio files (users must provide their own)
+*.wav
+*.mp3
+*.aiff
+*.m4a
+audio/
+
+# Internal LLM guides (do not upload)
+_coding_guide/
+
+# Cache and logs
+logs/*
+!logs/.gitkeep
+*.log
+notification_throttle.json
+completion_cache.json
+
+# Environment and local settings
+.env*
+*.local.json
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Development files
+_pending_rewrite/
+*.tmp
+*.bak
