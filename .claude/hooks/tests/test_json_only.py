@@ -8,11 +8,11 @@ from common_test_utils import run_hook
 def test_json_only_output() -> None:
     r = run_hook(
         script_relpath=".claude/hooks/notification.py",
-        payload={"event": "notification", "message": "json only"},
+        payload={"hookEventName": "Notification", "message": "json only"},
         args=["--enable-audio", "--json-only"],
     )
     lines = [ln for ln in r.stdout.strip().splitlines() if ln.strip()]
     # In json-only mode, only JSON line should be present
     assert len(lines) == 1
     obj = json.loads(lines[-1])
-    assert "hookSpecificOutput" in obj
+    assert obj["continue"] is True

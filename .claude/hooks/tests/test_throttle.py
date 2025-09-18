@@ -11,26 +11,28 @@ from common_test_utils import run_hook
 
 
 def test_notification_throttle() -> None:
-    payload = {"event": "notification", "message": "Same message for throttle"}
-    # First call: should not be throttled
+    payload = {"hookEventName": "Notification", "message": "Same message for throttle"}
     r1 = run_hook(".claude/hooks/notification.py", payload=payload, args=["--enable-audio"]) 
     assert r1.returncode == 0
     obj1 = json.loads([ln for ln in r1.stdout.splitlines() if ln.strip()][-1])
-    assert obj1["hookSpecificOutput"]["throttled"] is False
-    # Second call: should be throttled within 30s window
+    assert obj1["continue"] is True
+    # First call should not log throttle note
+    assert "Throttled" not in r1.stderr
     r2 = run_hook(".claude/hooks/notification.py", payload=payload, args=["--enable-audio"]) 
     obj2 = json.loads([ln for ln in r2.stdout.splitlines() if ln.strip()][-1])
-    assert obj2["hookSpecificOutput"]["throttled"] is True
+    assert obj2["continue"] is True
+    assert "Throttled" in r2.stderr
 
 
 def test_stop_throttle() -> None:
-    payload = {"event": "stop", "status": "task_complete"}
+    payload = {"hookEventName": "Stop", "status": "TaskComplete"}
     r1 = run_hook(".claude/hooks/stop.py", payload=payload, args=["--enable-audio"]) 
     obj1 = json.loads([ln for ln in r1.stdout.splitlines() if ln.strip()][-1])
-    assert obj1["hookSpecificOutput"]["throttled"] is False or obj1["hookSpecificOutput"]["throttled"] is True
+    assert obj1["continue"] is True
     r2 = run_hook(".claude/hooks/stop.py", payload=payload, args=["--enable-audio"]) 
     obj2 = json.loads([ln for ln in r2.stdout.splitlines() if ln.strip()][-1])
-    assert obj2["hookSpecificOutput"]["throttled"] is True
+    assert obj2["continue"] is True
+    assert "Throttled" in r2.stderr
 
 
 def main():

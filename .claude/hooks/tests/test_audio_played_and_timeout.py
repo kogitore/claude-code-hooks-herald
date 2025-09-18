@@ -30,9 +30,9 @@ def test_audio_played_true() -> None:
             'CLAUDE_SOUNDS_DIR': td,
             'AUDIO_PLAYER_CMD': 'true',  # simulate success
         }
-        r = run_hook(".claude/hooks/stop.py", payload={'event': 'stop'}, args=["--enable-audio"], timeout=3.0, env_overrides=env)
+        r = run_hook(".claude/hooks/stop.py", payload={'hookEventName': 'Stop'}, args=["--enable-audio"], timeout=3.0, env_overrides=env)
         assert r.returncode == 0
-        r2 = run_hook(".claude/hooks/stop.py", payload={'event': 'stop'}, args=["--enable-audio"], timeout=3.0, env_overrides=env)
+        r2 = run_hook(".claude/hooks/stop.py", payload={'hookEventName': 'Stop'}, args=["--enable-audio"], timeout=3.0, env_overrides=env)
         assert r2.returncode == 0
 
 
@@ -45,7 +45,7 @@ def test_timeout() -> None:
         os.environ['AUDIO_PLAYER_CMD'] = 'sleep'
         os.environ['AUDIO_PLAYER_ARGS'] = '10'
         os.environ['AUDIO_PLAYER_TIMEOUT'] = '1'
-        r = run_hook(".claude/hooks/stop.py", payload={'event': 'stop'}, args=["--enable-audio"], timeout=5.0)
+        r = run_hook(".claude/hooks/stop.py", payload={'hookEventName': 'Stop'}, args=["--enable-audio"], timeout=5.0)
         elapsed = time.time() - start
         assert r.returncode == 0
         assert elapsed < 3.0

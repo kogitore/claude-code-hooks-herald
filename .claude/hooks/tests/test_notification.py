@@ -7,7 +7,7 @@ from common_test_utils import run_hook
 
 
 def test_notification_basic() -> None:
-    payload = {"event": "notification", "message": "User prompt arrived"}
+    payload = {"hookEventName": "Notification", "message": "User prompt arrived"}
     marker = hashlib.sha1(str(payload).encode()).hexdigest()[:8]
     payload["marker"] = marker
     r = run_hook(
@@ -18,7 +18,6 @@ def test_notification_basic() -> None:
     assert r.returncode == 0
     lines = [ln for ln in r.stdout.strip().splitlines() if ln.strip()]
     obj = json.loads(lines[-1])
-    out = obj["hookSpecificOutput"]
-    assert out["hookEventName"] == "UserNotification"
-    assert out["status"] == "completed"
-    assert out["audioPlayed"] is True
+    assert obj["continue"] is True
+    # ensure stderr log references the official event name
+    assert "[Notification]" in r.stderr

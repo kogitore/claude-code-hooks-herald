@@ -7,7 +7,7 @@ from common_test_utils import run_hook
 
 
 def test_subagent_stop_basic() -> None:
-    payload = {"event": "subagent_stop", "status": "agent_complete"}
+    payload = {"hookEventName": "SubagentStop", "status": "SubagentComplete"}
     marker = hashlib.sha1(str(payload).encode()).hexdigest()[:8]
     payload["marker"] = marker
     r = run_hook(
@@ -18,6 +18,5 @@ def test_subagent_stop_basic() -> None:
     assert r.returncode == 0
     lines = [ln for ln in r.stdout.strip().splitlines() if ln.strip()]
     obj = json.loads(lines[-1])
-    out = obj["hookSpecificOutput"]
-    assert out["hookEventName"] == "AgentComplete"
-    assert out["status"] == "completed"
+    assert obj["continue"] is True
+    assert "[SubagentStop]" in r.stderr
