@@ -26,17 +26,18 @@ def main() -> int:
 
     am = AudioManager()
 
-    # Throttle: 30s for identical message content (if provided)
-    throttle_key = "user_notification"
+    # Throttle window configurable via audio_config.json (default 30s)
+    throttle_key = "Notification"
     msg = payload.get("message") if isinstance(payload, dict) else None
     if msg:
-        throttle_key = f"user_notification:{hashlib.sha1(str(msg).encode()).hexdigest()[:12]}"
+        throttle_key = f"Notification:{hashlib.sha1(str(msg).encode()).hexdigest()[:12]}"
 
-    throttled = am.should_throttle(throttle_key, window_seconds=30)
+    window_seconds = am.get_throttle_window("Notification", 30)
+    throttled = am.should_throttle(throttle_key, window_seconds=window_seconds)
     played = False
-    path = am.resolve_file("user_notification")
+    path = am.resolve_file("Notification")
     if not throttled:
-        played, path = am.play_audio("user_notification", enabled=args.enable_audio)
+        played, path = am.play_audio("Notification", enabled=args.enable_audio)
         am.mark_emitted(throttle_key)
 
     # Telemetry to stderr
@@ -45,10 +46,10 @@ def main() -> int:
         path=path,
         played=played,
         enabled=args.enable_audio,
-        throttle_msg="Throttled (<=30s)",
+        throttle_msg=f"Throttled (<= {window_seconds}s)",
     )
     try:
-        print(f"[notification] audioPlayed={bool(played)} throttled={bool(throttled)} path={path} notes={notes}", file=sys.stderr)
+        print(f"[Notification] audioPlayed={bool(played)} throttled={bool(throttled)} path={path} notes={notes}", file=sys.stderr)
     except Exception:
         pass
 

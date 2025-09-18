@@ -2,6 +2,8 @@
 
 [English](./README.md) | [繁體中文](./README_zh-TW.md)
 
+**Changelog:** see [CHANGELOG.md](./CHANGELOG.md) · **Design/Notes:** see [/updates](./updates/)
+
 </div>
 
 > 本專案啟發自 [disler/claude-code-hooks-mastery](https://github.com/disler/claude-code-hooks-mastery)

@@ -27,13 +27,14 @@ def main() -> int:
     payload, marker = parse_stdin()
 
     am = AudioManager()
-    # Throttle: 10 minutes like Stop
+    window_seconds = am.get_throttle_window("SubagentStop", 120)
+    # Throttle window configurable via audio_config.json (default 120s)
     played, path, throttled = process_completion(
         am,
-        audio_key="subagent_stop",
+        audio_key="SubagentStop",
         enable=bool(args.enable_audio),
-        throttle_key="subagent_stop",
-        window_seconds=600,
+        throttle_key="SubagentStop",
+        window_seconds=window_seconds,
     )
 
     # Telemetry to stderr
@@ -42,10 +43,10 @@ def main() -> int:
         path=path,
         played=played,
         enabled=bool(args.enable_audio),
-        throttle_msg="Throttled (<=10m)",
+        throttle_msg=f"Throttled (<= {window_seconds}s)",
     )
     try:
-        print(f"[subagent_stop] audioPlayed={bool(played)} throttled={bool(throttled)} path={path} notes={notes}", file=sys.stderr)
+        print(f"[SubagentStop] audioPlayed={bool(played)} throttled={bool(throttled)} path={path} notes={notes}", file=sys.stderr)
     except Exception:
         pass
 

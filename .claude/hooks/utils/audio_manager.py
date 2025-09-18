@@ -3,7 +3,8 @@
 Minimal Audio Manager for Claude Code Hooks (pure local audio files)
 
 - No TTS/LLM, no network calls
-- Uses system audio players when available (afplay/ffplay/aplay)
+- Uses system audio players when available (afplay/ffplay/aplay/winsound)
+- Cross-platform volume control: macOS/Linux via player args, Windows via audioop
 - Paths simplified: repo root is assumed at Path(__file__).parents[3]
 """
 from __future__ import annotations
@@ -56,14 +57,52 @@ def _play_with(cmd: str, args: list[str], timeout_s: float = 5.0) -> int:
         return 1
 
 
-def _play_with_windows(filepath: str, timeout_s: float = 5.0) -> int:
-    """Windows-specific audio player using winsound"""
+def _play_with_windows(filepath: str, volume: float = 1.0, timeout_s: float = 5.0) -> int:
+    """Windows-specific audio player using winsound with volume control"""
     try:
         import winsound
-        winsound.PlaySound(str(filepath), winsound.SND_FILENAME)
+
+        if volume >= 1.0:
+            # No volume adjustment needed, play original file
+            winsound.PlaySound(str(filepath), winsound.SND_FILENAME)
+            return 0
+
+        # Perform volume adjustment using standard library
+        import audioop
+        import wave
+        import io
+
+        # Read WAV file
+        with wave.open(str(filepath), 'rb') as wav_file:
+            frames = wav_file.readframes(-1)
+            sample_width = wav_file.getsampwidth()
+            channels = wav_file.getnchannels()
+            framerate = wav_file.getframerate()
+
+        # Adjust volume (volume range 0.0-1.0)
+        adjusted_frames = audioop.mul(frames, sample_width, volume)
+
+        # Create in-memory WAV data
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, 'wb') as out_wav:
+            out_wav.setnchannels(channels)
+            out_wav.setsampwidth(sample_width)
+            out_wav.setframerate(framerate)
+            out_wav.writeframes(adjusted_frames)
+
+        # Play adjusted audio from memory
+        wav_data = wav_buffer.getvalue()
+        winsound.PlaySound(wav_data, winsound.SND_MEMORY)
         return 0
+
     except Exception:
-        return 1
+        # Fallback: play without volume control
+        try:
+            import winsound
+            winsound.PlaySound(str(filepath), winsound.SND_FILENAME)
+            return 0
+        except Exception:
+            return 1
 
 
 @dataclass
@@ -110,6 +149,7 @@ class AudioManager:
 
         # Optional config override (config wins over defaults)
         volume = 0.2
+        throttle_cfg: Dict[str, int] = {}
 
         try:
             m = cfg.get("sound_files", {}).get("mappings", {})
@@ -120,11 +160,18 @@ class AudioManager:
             vol = cfg.get("audio_settings", {}).get("volume")
             if isinstance(vol, (int, float)):
                 volume = max(0.0, min(1.0, float(vol)))
+            throttle_settings = cfg.get("audio_settings", {}).get("throttle_seconds", {})
+            if isinstance(throttle_settings, dict):
+                for raw_key, value in throttle_settings.items():
+                    if isinstance(value, (int, float)):
+                        canonical = _canonical_audio_key(str(raw_key))
+                        throttle_cfg[canonical] = max(0, int(value))
         except Exception:
             pass
 
         self.config = AudioConfig(base_path=sounds_dir, mappings=mappings)
         self.volume = volume
+        self._throttle_cfg = throttle_cfg
 
         # Throttle store under repo_root/logs
         self._throttle_path = repo_root / "logs" / "audio_throttle.json"
@@ -171,6 +218,14 @@ class AudioManager:
         p = self.config.base_path / str(name)
         return p if p.exists() else None
 
+    def get_throttle_window(self, audio_type: str, default_seconds: int) -> int:
+        """Return throttle window for audio_type using config overrides."""
+        audio_type = self._normalize_key(audio_type)
+        cfg_value = self._throttle_cfg.get(audio_type)
+        if isinstance(cfg_value, int) and cfg_value >= 0:
+            return cfg_value
+        return max(0, int(default_seconds))
+
     def play_audio(self, audio_type: str, enabled: bool = False) -> tuple[bool, Optional[Path]]:
         """Attempt to play local audio. Returns (played, path).
 
@@ -185,7 +240,7 @@ class AudioManager:
         # Use cached player
         if self._player_cmd:
             if self._player_cmd == "winsound":
-                rc = _play_with_windows(str(path), timeout_s=self._timeout_s)
+                rc = _play_with_windows(str(path), volume=self.volume, timeout_s=self._timeout_s)
             else:
                 rc = _play_with(self._player_cmd, self._player_base_args + [str(path)], timeout_s=self._timeout_s)
             return (rc == 0), path

@@ -27,13 +27,14 @@ def main() -> int:
     payload, marker = parse_stdin()
 
     am = AudioManager()
-    # Throttle: 10 minutes for completion chimes
+    window_seconds = am.get_throttle_window("Stop", 120)
+    # Throttle window configurable via audio_config.json (default 120s)
     played, path, throttled = process_completion(
         am,
-        audio_key="stop",
+        audio_key="Stop",
         enable=bool(args.enable_audio),
-        throttle_key="stop",
-        window_seconds=600,
+        throttle_key="Stop",
+        window_seconds=window_seconds,
     )
 
     # Telemetry to stderr (so UI JSON validator stays happy)
@@ -42,10 +43,10 @@ def main() -> int:
         path=path,
         played=played,
         enabled=bool(args.enable_audio),
-        throttle_msg="Throttled (<=10m)",
+        throttle_msg=f"Throttled (<= {window_seconds}s)",
     )
     try:
-        print(f"[stop] audioPlayed={bool(played)} throttled={bool(throttled)} path={path} notes={notes}", file=sys.stderr)
+        print(f"[Stop] audioPlayed={bool(played)} throttled={bool(throttled)} path={path} notes={notes}", file=sys.stderr)
     except Exception:
         pass
 
