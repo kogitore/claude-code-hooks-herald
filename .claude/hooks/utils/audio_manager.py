@@ -17,6 +17,22 @@ from pathlib import Path
 from typing import Dict, Optional, List, Tuple
 
 
+_CANONICAL_AUDIO_KEYS = {
+    "stop": "Stop",
+    "subagentstop": "SubagentStop",
+    "notification": "Notification",
+    "agentstop": "SubagentStop",  # legacy alias
+    "usernotification": "Notification",  # legacy alias
+}
+
+
+def _canonical_audio_key(raw: str) -> str:
+    if not isinstance(raw, str):
+        return raw
+    key = raw.replace("_", "").lower()
+    return _CANONICAL_AUDIO_KEYS.get(key, raw)
+
+
 def _load_config(config_path: Path) -> Dict:
     try:
         if config_path.exists():
@@ -36,6 +52,16 @@ def _play_with(cmd: str, args: list[str], timeout_s: float = 5.0) -> int:
     try:
         p = subprocess.run([cmd] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout_s)
         return p.returncode
+    except Exception:
+        return 1
+
+
+def _play_with_windows(filepath: str, timeout_s: float = 5.0) -> int:
+    """Windows-specific audio player using winsound"""
+    try:
+        import winsound
+        winsound.PlaySound(str(filepath), winsound.SND_FILENAME)
+        return 0
     except Exception:
         return 1
 
@@ -75,19 +101,22 @@ class AudioManager:
         if not sounds_dir:
             sounds_dir = repo_root / ".claude" / "sounds"
 
-        # Defaults (new, more descriptive keys)
+        # Defaults map to official event names
         mappings = {
-            "stop": "task_complete.wav",
-            "agent_stop": "agent_complete.wav",
-            "user_notification": "user_prompt.wav",
+            "Stop": "task_complete.wav",
+            "SubagentStop": "agent_complete.wav",
+            "Notification": "user_prompt.wav",
         }
 
         # Optional config override (config wins over defaults)
         volume = 0.2
+
         try:
             m = cfg.get("sound_files", {}).get("mappings", {})
             if isinstance(m, dict):
-                mappings.update({k: str(v) for k, v in m.items()})
+                for raw_key, value in m.items():
+                    canonical = _canonical_audio_key(raw_key)
+                    mappings[canonical] = str(value)
             vol = cfg.get("audio_settings", {}).get("volume")
             if isinstance(vol, (int, float)):
                 volume = max(0.0, min(1.0, float(vol)))
@@ -123,14 +152,20 @@ class AudioManager:
             return "ffplay", args
         if _which("aplay"):
             return "aplay", []  # aplay doesn't support volume uniformly
+        # Windows fallback: use winsound via Python
+        import platform
+        if platform.system() == "Windows":
+            return "winsound", []  # Special marker for Windows native audio
         return None, []
 
+    def _normalize_key(self, audio_type: str) -> str:
+        return _canonical_audio_key(audio_type)
+
     def resolve_file(self, audio_type: str) -> Optional[Path]:
-        # Only accept canonical keys; with one intentional fallback:
-        # 'subagent_stop' falls back to 'agent_stop' if not configured.
+        audio_type = self._normalize_key(audio_type)
         name = self.config.mappings.get(audio_type)
-        if name is None and audio_type == "subagent_stop":
-            name = self.config.mappings.get("agent_stop")
+        if name is None and audio_type == "SubagentStop":
+            name = self.config.mappings.get("Stop")
         if not name:
             return None
         p = self.config.base_path / str(name)
@@ -142,13 +177,17 @@ class AudioManager:
         - If not enabled or file missing, returns (False, maybe_path)
         - Does not raise on failure
         """
+        audio_type = self._normalize_key(audio_type)
         path = self.resolve_file(audio_type)
         if not enabled or path is None:
             return False, path
 
         # Use cached player
         if self._player_cmd:
-            rc = _play_with(self._player_cmd, self._player_base_args + [str(path)], timeout_s=self._timeout_s)
+            if self._player_cmd == "winsound":
+                rc = _play_with_windows(str(path), timeout_s=self._timeout_s)
+            else:
+                rc = _play_with(self._player_cmd, self._player_base_args + [str(path)], timeout_s=self._timeout_s)
             return (rc == 0), path
         return False, path
 
@@ -208,4 +247,3 @@ class AudioManager:
         data = self._read_throttle()
         data[str(key)] = float(when)
         self._write_throttle(data)
-
