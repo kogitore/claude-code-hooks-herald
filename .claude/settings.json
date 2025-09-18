@@ -2,11 +2,11 @@
   "hooks": {
     "Notification": [
       {
-        "matcher": "",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/notification.py --enable-audio"
+            "command": "uv run .claude/hooks/herald.py --hook Notification --enable-audio"
           }
         ]
       }
@@ -17,7 +17,73 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/stop.py --enable-audio"
+            "command": "uv run .claude/hooks/herald.py --hook Stop --enable-audio"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run .claude/hooks/herald.py --hook SubagentStop --enable-audio"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run .claude/hooks/herald.py --hook PreToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run .claude/hooks/herald.py --hook PostToolUse"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run .claude/hooks/herald.py --hook UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run .claude/hooks/herald.py --hook SessionStart"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run .claude/hooks/herald.py --hook SessionEnd"
           }
         ]
       }
