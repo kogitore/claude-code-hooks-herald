@@ -49,9 +49,9 @@ def main() -> int:
     except Exception:
         pass
 
-    # JSON output with hookSpecificOutput for tests/diagnostics
-    # For completion hooks, stdout should be empty.
-    # The hook succeeds by exiting with code 0.
+    # Output required JSON response per Claude Code Hooks specification
+    response = {"continue": True}
+    print(_json.dumps(response))
     return 0
 
 
