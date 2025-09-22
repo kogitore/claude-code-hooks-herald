@@ -26,8 +26,13 @@ from utils.audio_manager import AudioManager
 from utils.common_io import generate_audio_notes, parse_stdin
 from utils.decision_api import DecisionAPI
 from notification import NotificationHook
+from post_tool_use import PostToolUseHook
+from pre_tool_use import PreToolUseHook
+from session_end import SessionEndHook
+from session_start import SessionStartHook
 from stop import StopHook
 from subagent_stop import SubagentStopHook
+from user_prompt_submit import UserPromptSubmitHook
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +123,11 @@ DEFAULT_THROTTLE_WINDOWS: MutableMapping[str, int] = {
     "Notification": 30,
     "Stop": 600,
     "SubagentStop": 600,
+    "PreToolUse": 60,
+    "PostToolUse": 45,
+    "SessionStart": 5,
+    "SessionEnd": 5,
+    "UserPromptSubmit": 10,
 }
 
 
@@ -298,15 +308,10 @@ class HeraldDispatcher:
                 pass
 
         # Ensure only schema-compliant top-level fields are present
-        schema_fields = {"continue", "suppressOutput", "stopReason", "decision", "reason", "systemMessage", "permissionDecision", "hookSpecificOutput"}
+        schema_fields = {"continue", "suppressOutput", "stopReason", "systemMessage", "decision", "reason", "hookSpecificOutput"}
         response = {k: v for k, v in response.items() if k in schema_fields}
 
         # Map decision values to Claude Code schema requirements
-        if "decision" in response:
-            if response["decision"] == "allow":
-                response["decision"] = "approve"
-            # "block" remains "block" as it's already correct
-
         return DispatchReport(
             event_type=event_type,
             handler_name=handler_name,
@@ -364,6 +369,17 @@ def build_default_dispatcher(
     notification_hook = NotificationHook(audio_manager=dispatcher.audio_manager)
     stop_hook = StopHook(audio_manager=dispatcher.audio_manager)
     subagent_hook = SubagentStopHook(audio_manager=dispatcher.audio_manager)
+    pre_tool_use_hook = PreToolUseHook(
+        audio_manager=dispatcher.audio_manager,
+        decision_api=dispatcher.decision_api,
+    )
+    post_tool_use_hook = PostToolUseHook(
+        audio_manager=dispatcher.audio_manager,
+        decision_api=dispatcher.decision_api,
+    )
+    session_start_hook = SessionStartHook(audio_manager=dispatcher.audio_manager)
+    session_end_hook = SessionEndHook(audio_manager=dispatcher.audio_manager)
+    user_prompt_hook = UserPromptSubmitHook(audio_manager=dispatcher.audio_manager)
 
     def _decision_api_for(context: DispatchContext) -> DecisionAPI:
         return context.decision_api or dispatcher.decision_api
@@ -376,13 +392,25 @@ def build_default_dispatcher(
 
     def _hook_handler(event_name: str, hook_instance):
         def handler(context: DispatchContext) -> HandlerResult:
-            result = hook_instance.execute(context.payload, enable_audio=False)
+            result = hook_instance.execute(
+                context.payload,
+                enable_audio=context.enable_audio,
+                parsed_args=context.metadata.get("argv"),
+            )
             hr = HandlerResult()
             hr.continue_value = result.continue_value
             hr.response.update(result.payload)
             hr.audio_type = result.audio_type or event_name
             hr.throttle_key = result.throttle_key
             hr.throttle_window = result.throttle_window
+            hr.notes.extend(result.notes)
+            if result.errors:
+                context.errors.extend(result.errors)
+
+            last_decision = getattr(hook_instance, "_last_decision", None)
+            if last_decision is not None and hasattr(last_decision, "to_dict"):
+                hr.decision_payload = last_decision.to_dict()
+                hr.blocked = getattr(last_decision, "blocked", False)
             return hr
 
         return handler
@@ -394,47 +422,27 @@ def build_default_dispatcher(
         _apply_decision(hr, decision)
 
         # Preserve audio-related properties from the original hook if needed
-        result = hook_instance.execute(context.payload, enable_audio=False)
+        result = hook_instance.execute(context.payload, enable_audio=context.enable_audio)
         hr.audio_type = result.audio_type or context.event_type
         hr.throttle_key = result.throttle_key
         hr.throttle_window = result.throttle_window
         return hr
 
-    def _pre_tool_use_handler(context: DispatchContext) -> HandlerResult:
-        api = _decision_api_for(context)
-        payload = context.payload if isinstance(context.payload, dict) else {}
-        decision = api.pre_tool_use_decision(_extract_tool_name(payload), _extract_tool_input(payload))
-        hr = HandlerResult()
-        _apply_decision(hr, decision)
-        hr.suppress_audio = True
-        return hr
-
-    def _post_tool_use_handler(context: DispatchContext) -> HandlerResult:
-        api = _decision_api_for(context)
-        payload = context.payload if isinstance(context.payload, dict) else {}
-        decision = api.post_tool_use_decision(_extract_tool_name(payload), payload)
-        hr = HandlerResult()
-        _apply_decision(hr, decision)
-        hr.suppress_audio = True
-        return hr
-
-    dispatcher.register_handler("Notification", _hook_handler("Notification", notification_hook), audio_type=None)
-    dispatcher.register_handler("Stop", lambda ctx: _stop_handler(ctx, stop_hook), audio_type=None)
-    dispatcher.register_handler(
-        "SubagentStop",
-        lambda ctx: _stop_handler(ctx, subagent_hook),
-        audio_type=None,
-    )
-    dispatcher.register_handler("PreToolUse", _pre_tool_use_handler, audio_type=None)
-    dispatcher.register_handler("PostToolUse", _post_tool_use_handler, audio_type=None)
+    dispatcher.register_handler("Notification", _hook_handler("Notification", notification_hook), audio_type="Notification")
+    dispatcher.register_handler("Stop", lambda ctx: _stop_handler(ctx, stop_hook), audio_type="Stop")
+    dispatcher.register_handler("SubagentStop", lambda ctx: _stop_handler(ctx, subagent_hook), audio_type="SubagentStop")
+    dispatcher.register_handler("PreToolUse", _hook_handler("PreToolUse", pre_tool_use_hook), audio_type="PreToolUse", throttle_window=pre_tool_use_hook.default_throttle_seconds)
+    dispatcher.register_handler("PostToolUse", _hook_handler("PostToolUse", post_tool_use_hook), audio_type="PostToolUse", throttle_window=post_tool_use_hook.default_throttle_seconds)
+    dispatcher.register_handler("SessionStart", _hook_handler("SessionStart", session_start_hook), audio_type="SessionStart", throttle_window=session_start_hook.default_throttle_seconds)
+    dispatcher.register_handler("SessionEnd", _hook_handler("SessionEnd", session_end_hook), audio_type="SessionEnd", throttle_window=session_end_hook.default_throttle_seconds)
+    dispatcher.register_handler("UserPromptSubmit", _hook_handler("UserPromptSubmit", user_prompt_hook), audio_type="UserPromptSubmit", throttle_window=user_prompt_hook.default_throttle_seconds)
 
     def _noop_handler(_: DispatchContext) -> HandlerResult:
         hr = HandlerResult()
         hr.suppress_audio = True
         return hr
 
-    for evt in ("UserPromptSubmit", "SessionStart", "SessionEnd", "PreCompact"):
-        dispatcher.register_handler(evt, _noop_handler, audio_type=None)
+    dispatcher.register_handler("PreCompact", _noop_handler, audio_type=None)
 
     return dispatcher
 
@@ -448,7 +456,11 @@ def _extract_tool_name(payload: Dict[str, Any]) -> str:
 
 
 def _extract_tool_input(payload: Dict[str, Any]) -> Dict[str, Any]:
-    candidate = payload.get("toolInput") or payload.get("input") or payload.get("args")
+    # 支援Claude Code標準欄位名稱
+    candidate = (payload.get("toolInput") or
+                 payload.get("tool_input") or
+                 payload.get("input") or
+                 payload.get("args"))
     if isinstance(candidate, dict):
         return candidate
     if isinstance(candidate, (list, tuple)):

@@ -14,11 +14,12 @@ Unified dispatcher + audio-only hook system for Claude Code. Herald routes every
 
 ## Features
 
-- 🛡️ **Herald dispatcher** – Single entry point (`.claude/hooks/herald.py`) for Notification / Stop / SubagentStop / PreToolUse / PostToolUse / Session events.
+- 🛡️ **Herald dispatcher** – Single entry point (`.claude/hooks/herald.py`) for 8/9 official Claude Code events (8 implemented, PreCompact pending).
 - 🧩 **BaseHook framework** – Shared validation + playback pipeline keeps individual hooks tiny and reliable.
 - 🧠 **Decision API** – Allow/Deny/Ask/BlockStop responses with user overrides via `decision_policy.json`.
 - 🔔 **Audio feedback** – Local `.wav` playback for notifications and completion cues.
 - ⏱️ **Smart throttling** – Config-driven per-event cooldowns to prevent sound spam.
+- ✅ **Claude Code Compatible** – Full support for both legacy and standard field formats (`tool_name`/`tool_input`).
 
 ## Quick Start
 

@@ -4,7 +4,12 @@
     "mappings": {
       "Stop": "task_complete.wav",
       "SubagentStop": "agent_complete.wav",
-      "Notification": "user_prompt.wav"
+      "Notification": "user_prompt.wav",
+      "PreToolUse": "user_prompt.wav",
+      "PostToolUse": "task_complete.wav",
+      "SessionStart": "user_prompt.wav",
+      "SessionEnd": "task_complete.wav",
+      "UserPromptSubmit": "user_prompt.wav"
     }
   },
   "audio_settings": {
@@ -12,7 +17,12 @@
     "throttle_seconds": {
       "Stop": 120,
       "SubagentStop": 120,
-      "Notification": 30
+      "Notification": 30,
+      "PreToolUse": 60,
+      "PostToolUse": 45,
+      "SessionStart": 5,
+      "SessionEnd": 5,
+      "UserPromptSubmit": 10
     }
   }
 }

@@ -24,6 +24,11 @@ _CANONICAL_AUDIO_KEYS = {
     "notification": "Notification",
     "agentstop": "SubagentStop",  # legacy alias
     "usernotification": "Notification",  # legacy alias
+    "pretooluse": "PreToolUse",
+    "posttooluse": "PostToolUse",
+    "sessionstart": "SessionStart",
+    "sessionend": "SessionEnd",
+    "userpromptsubmit": "UserPromptSubmit",
 }
 
 
@@ -51,8 +56,14 @@ def _which(cmd: str) -> Optional[str]:
 
 def _play_with(cmd: str, args: list[str], timeout_s: float = 5.0) -> int:
     try:
-        p = subprocess.run([cmd] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout_s)
-        return p.returncode
+        # For audio players, we want fire-and-forget behavior
+        # Use Popen with detached process to avoid waiting for audio completion
+        p = subprocess.Popen([cmd] + args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Quick check if process started successfully
+        if p.poll() is None:  # Process is still running (good)
+            return 0
+        else:  # Process exited immediately (likely error)
+            return p.returncode
     except Exception:
         return 1
 
@@ -145,6 +156,11 @@ class AudioManager:
             "Stop": "task_complete.wav",
             "SubagentStop": "agent_complete.wav",
             "Notification": "user_prompt.wav",
+            "PreToolUse": "security_check.wav",
+            "PostToolUse": "task_complete.wav",
+            "SessionStart": "session_start.wav",
+            "SessionEnd": "session_complete.wav",
+            "UserPromptSubmit": "user_prompt.wav",
         }
 
         # Optional config override (config wins over defaults)

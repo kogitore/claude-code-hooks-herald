@@ -23,13 +23,13 @@ echo "=================================================="
 # Function to log errors
 log_error() {
     echo -e "${RED}❌ ERROR: $1${NC}"
-    ((ERRORS++))
+    ((ERRORS+=1))
 }
 
 # Function to log warnings
 log_warning() {
     echo -e "${YELLOW}⚠️  WARNING: $1${NC}"
-    ((WARNINGS++))
+    ((WARNINGS+=1))
 }
 
 # Function to log success
@@ -69,7 +69,7 @@ else
                     log_success "herald.py dispatcher configured"
 
                     # Check event name case sensitivity
-                    EVENTS=("Notification" "Stop" "SubagentStop")
+                    EVENTS=("Notification" "Stop" "SubagentStop" "PreToolUse" "PostToolUse" "UserPromptSubmit" "SessionStart" "SessionEnd")
                     for event in "${EVENTS[@]}"; do
                         if grep -q "\"$event\"" .claude/settings.json; then
                             log_success "Event '$event' properly capitalized"
@@ -148,7 +148,7 @@ with open('.claude/hooks/utils/audio_config.json') as f:
             log_success "Audio directory '$BASE_PATH' exists"
 
             # Check for required audio files
-            AUDIO_FILES=("task_complete.wav" "agent_complete.wav" "user_prompt.wav")
+            AUDIO_FILES=("task_complete.wav" "agent_complete.wav" "user_prompt.wav" "security_check.wav" "session_start.wav" "session_complete.wav")
             for file in "${AUDIO_FILES[@]}"; do
                 if [ -f "$BASE_PATH/$file" ]; then
                     log_success "Audio file '$file' found"

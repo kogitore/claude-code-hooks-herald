@@ -14,11 +14,12 @@ Herald 為 Claude Code 提供單一入口的掛鉤系統：所有官方事件都
 
 ## 功能
 
-- 🛡️ **Herald Dispatcher**：單一入口（Notification / Stop / SubagentStop / PreToolUse / PostToolUse / Session）。
+- 🛡️ **Herald Dispatcher**：單一入口支援 8/9 官方 Claude Code 事件（已實作8個，PreCompact待完成）。
 - 🧩 **BaseHook 共用框架**：統一驗證、節流、音效播放，讓各 hook 只需託管業務邏輯。
 - 🧠 **Decision API**：支援 Allow / Deny / Ask / BlockStop，並可透過 `decision_policy.json` 客製規則。
 - 🔔 **音效回饋**：播放本機 `.wav` 檔，不需 API Key 或網路存取。
 - ⏱️ **智慧節流**：依事件種類套用可調整的冷卻時間，避免音效轟炸。
+- ✅ **Claude Code 相容**：完整支援新舊兩種欄位格式（`tool_name`/`tool_input` 與 legacy 格式）。
 
 ## 快速開始
 

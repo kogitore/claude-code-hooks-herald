@@ -25,17 +25,17 @@ echo "=============================================="
 # Function to log test results
 log_test_start() {
     echo -e "\n${PURPLE}🔬 Test: $1${NC}"
-    ((TESTS_TOTAL++))
+    ((TESTS_TOTAL+=1))
 }
 
 log_test_pass() {
     echo -e "${GREEN}✅ PASS: $1${NC}"
-    ((TESTS_PASSED++))
+    ((TESTS_PASSED+=1))
 }
 
 log_test_fail() {
     echo -e "${RED}❌ FAIL: $1${NC}"
-    ((TESTS_FAILED++))
+    ((TESTS_FAILED+=1))
 }
 
 log_info() {
@@ -63,17 +63,27 @@ fi
 log_info "Prerequisites met. Starting E2E tests..."
 
 # Test 1: Herald Dispatcher Basic Functionality
-log_test_start "Herald dispatcher responds to valid events"
+log_test_start "Herald dispatcher responds to official events"
 
-BASIC_EVENTS=("Notification" "Stop" "SubagentStop")
+OFFICIAL_EVENTS=("Notification" "Stop" "SubagentStop" "PreToolUse" "PostToolUse" "UserPromptSubmit" "SessionStart" "SessionEnd")
 BASIC_TESTS_PASSED=0
 
-for event in "${BASIC_EVENTS[@]}"; do
-    # Test with no-audio to avoid sound during automated testing
+for event in "${OFFICIAL_EVENTS[@]}"; do
+    payload='{}'
+    case "$event" in
+        Notification) payload='{"message":"e2e-notification"}' ;;
+        Stop) payload='{"marker":"e2e-stop"}' ;;
+        SubagentStop) payload='{"marker":"e2e-subagent"}' ;;
+        PreToolUse) payload='{"tool":"bash","toolInput":{"command":"echo test"}}' ;;
+        PostToolUse) payload='{"tool":"bash","result":{"success":true,"output":"ok"}}' ;;
+        UserPromptSubmit) payload='{"prompt":"hello world","user_id":"tester"}' ;;
+        SessionStart) payload='{"session_id":"sess-123","start_time":"2025-09-22T00:00:00Z"}' ;;
+        SessionEnd) payload='{"session_id":"sess-123","end_time":"2025-09-22T01:00:00Z","termination_reason":"normal"}' ;;
+    esac
     export AUDIO_PLAYER_CMD=true
-    RESULT=$(echo '{"test": "e2e_basic"}' | ./.claude/hooks/herald.py --hook "$event" --json-only 2>/dev/null | head -1 || echo "FAILED")
+    RESULT=$(echo "$payload" | ./.claude/hooks/herald.py --hook "$event" --json-only 2>/dev/null | head -1 || echo "FAILED")
 
-    if [[ "$RESULT" == *"continue"* ]] || [[ "$RESULT" == *"true"* ]]; then
+    if echo "$RESULT" | python3 -m json.tool >/dev/null 2>&1; then
         log_info "  ✓ $event event processed successfully"
         ((BASIC_TESTS_PASSED++))
     else
@@ -81,11 +91,12 @@ for event in "${BASIC_EVENTS[@]}"; do
     fi
 done
 
-if [ $BASIC_TESTS_PASSED -eq ${#BASIC_EVENTS[@]} ]; then
-    log_test_pass "Herald processes all basic events correctly"
+if [ $BASIC_TESTS_PASSED -eq ${#OFFICIAL_EVENTS[@]} ]; then
+    log_test_pass "Herald processes all official events correctly"
 else
-    log_test_fail "Herald failed to process $((${#BASIC_EVENTS[@]} - BASIC_TESTS_PASSED)) out of ${#BASIC_EVENTS[@]} events"
+    log_test_fail "Herald failed to process $((${#OFFICIAL_EVENTS[@]} - BASIC_TESTS_PASSED)) out of ${#OFFICIAL_EVENTS[@]} events"
 fi
+
 
 # Test 2: JSON Response Format Validation
 log_test_start "Herald outputs valid JSON responses"
@@ -111,11 +122,13 @@ if echo "$DECISION_RESULT" | python3 -c "
 import json, sys
 try:
     data = json.load(sys.stdin)
-    if 'decision' in data and data['decision'] in ['allow', 'deny', 'ask']:
+    hook = data.get('hookSpecificOutput', {})
+    decision = hook.get('permissionDecision')
+    if decision in ['allow', 'deny', 'ask']:
         print('VALID_DECISION')
     else:
         print('INVALID_DECISION')
-except:
+except Exception:
     print('INVALID_JSON')
 " | grep -q "VALID_DECISION"; then
     log_test_pass "Decision API returns valid decision format"
@@ -203,7 +216,7 @@ if [ -f ".claude/settings.json" ] && grep -q "herald.py" .claude/settings.json; 
     SETTINGS_EVENTS=$(grep -o '"[A-Z][a-zA-Z]*"' .claude/settings.json | tr -d '"' | sort -u)
 
     for event in $SETTINGS_EVENTS; do
-        if [[ "$event" =~ ^(Notification|Stop|SubagentStop|PreToolUse|PostToolUse|Session)$ ]]; then
+        if [[ "$event" =~ ^(Notification|Stop|SubagentStop|PreToolUse|PostToolUse|UserPromptSubmit|SessionStart|SessionEnd)$ ]]; then
             log_info "  ✓ Valid event configured: $event"
         else
             log_info "  ⚠ Unknown event configured: $event"

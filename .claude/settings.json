@@ -1,25 +1,70 @@
 {
   "hooks": {
-    "Notification": [{
-      "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook Notification --enable-audio"
-      }]
-    }],
-    "Stop": [{
-      "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook Stop --enable-audio"
-      }]
-    }],
-    "SubagentStop": [{
-      "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook SubagentStop --enable-audio"
-      }]
-    }]
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook Notification"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook Stop"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook SubagentStop"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook SessionStart"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook SessionEnd"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook UserPromptSubmit"
+          }
+        ]
+      }
+    ]
   }
 }

@@ -73,6 +73,7 @@ class BaseHook(abc.ABC):
         audio_event: Optional[str] = None,
         throttle_key: Optional[str] = None,
         throttle_seconds: Optional[int] = None,
+        parsed_args: Optional[Any] = None,
     ) -> HookExecutionResult:
         payload = data or {}
         result = HookExecutionResult()
@@ -86,9 +87,9 @@ class BaseHook(abc.ABC):
             return result
 
         try:
-            extra = self.process(payload)
-            if extra:
-                result.payload.update(extra)
+            result = self.handle_hook_logic(payload, parsed_args=parsed_args)
+            if not isinstance(result, HookExecutionResult):
+                raise TypeError("handle_hook_logic must return HookExecutionResult")
         except Exception as exc:
             result = self._error_result(exc, result)
         else:
@@ -203,3 +204,25 @@ class BaseHook(abc.ABC):
                     return f"Notification:{digest}"
         marker = marker or "default"
         return f"{audio_event}:{marker}"
+
+    # -- Extension hooks -------------------------------------------------
+    def handle_hook_logic(
+        self,
+        data: Dict[str, Any],
+        *,
+        parsed_args: Optional[Any] = None,
+    ) -> HookExecutionResult:
+        """Default hook execution pathway used by most hooks.
+
+        Subclasses can override this to gain full control over the
+        `HookExecutionResult`. When left untouched, it simply delegates to the
+        legacy `process()` implementation so existing hooks continue to work.
+        """
+
+        extra = self.process(data)
+        result = HookExecutionResult()
+        if extra:
+            if not isinstance(extra, dict):
+                raise TypeError("process() must return a dictionary payload")
+            result.payload.update(extra)
+        return result
