@@ -10,39 +10,27 @@
 
 # Claude Code Hooks Herald
 
-A collection of audio enhancement hooks for Claude Code that provides sound feedback for various development events.
+Unified dispatcher + audio-only hook system for Claude Code. Herald routes every official event through a single entry point, plays local audio with throttling, and applies a configurable safety policy before tools run.
 
 ## Features
 
-- 🔔 **Notification sounds** - Audio feedback for user prompts
-- ✅ **Task completion sounds** - Audio confirmation when tasks finish
-- 🎯 **Subagent completion sounds** - Special audio for subagent tasks
-- ⏱️ **Smart throttling** - Prevents audio spam with intelligent caching
-- 🎵 **Local audio files** - Uses your own .wav files, no API keys required
+- 🛡️ **Herald dispatcher** – Single entry point (`.claude/hooks/herald.py`) for Notification / Stop / SubagentStop / PreToolUse / PostToolUse / Session events.
+- 🧩 **BaseHook framework** – Shared validation + playback pipeline keeps individual hooks tiny and reliable.
+- 🧠 **Decision API** – Allow/Deny/Ask/BlockStop responses with user overrides via `decision_policy.json`.
+- 🔔 **Audio feedback** – Local `.wav` playback for notifications and completion cues.
+- ⏱️ **Smart throttling** – Config-driven per-event cooldowns to prevent sound spam.
 
 ## Quick Start
 
 This project requires no complex installation. The minimal steps to get started are:
 
-1.  **Install uv (recommended):** This project uses [uv](https://docs.astral.sh/uv/) for fast Python script execution. Install it via:
-    ```bash
-    curl -LsSf https://astral.sh/install.sh | sh
-    ```
-    Alternatively, you can use `python3` directly instead of `uv run` in all commands below.
-
-2.  **Provide Sound Files:** Place your `.wav` audio files inside the `.claude/sounds/` directory.
-
-3.  **Name Them Correctly:** Ensure the filenames match those expected by the configuration (e.g., `user_prompt.wav`, `task_complete.wav`).
-
-That's it! The hooks will automatically pick up the sounds. For more advanced changes, see the configuration details below.
-
-## Requirements
-
-- **Python 3.10+** (the hooks only use the standard library).
-- **[uv](https://docs.astral.sh/uv/)** for running the provided commands without activating a virtual environment. Install via `curl -LsSf https://astral.sh/install.sh | sh` or check the uv docs for platform-specific instructions. If you prefer not to install uv, replace `uv run ...` with `python3 .claude/hooks/<script>.py ...`.
-- **System audio utilities**: macOS ships with `afplay`; Linux requires either `ffplay` (from FFmpeg) or `aplay` (from ALSA); Windows relies on the built-in `winsound` module.
+1. **Provide sound files:** Place `.wav` files in `.claude/sounds/`.
+2. **Confirm settings:** `.claude/settings.json` is already wired to run `herald.py` for every event. Copy it into your Claude project if necessary.
+3. **Run hooks:** Claude Code will invoke Herald automatically; you can also test manually (see CLI section).
 
 ## Configuration
+
+### Audio mappings
 
 Audio settings are managed through `.claude/hooks/utils/audio_config.json`:
 
@@ -65,12 +53,46 @@ Audio settings are managed through `.claude/hooks/utils/audio_config.json`:
 }
 ```
 
+### Decision policy
+
+Safety decisions (Allow / Deny / Ask / BlockStop) are defined in `.claude/hooks/utils/decision_policy.json`. Add custom rules under `pre_tool_use.rules` or tweak `post_tool_use` / `stop` behaviour. Example rule:
+
+```json
+{
+  "pre_tool_use": {
+    "rules": [
+      {
+        "type": "command",
+        "action": "deny",
+        "pattern": "git\\s+reset\\s+--hard",
+        "reason": "Confirm before wiping all changes"
+      }
+    ]
+  }
+}
+```
+
+User rules are appended to the defaults, so built-in protections remain active.
+
+**Quick start:** copy `.claude/hooks/utils/decision_policy.example.json` to `decision_policy.json`, remove the sections you do not need, then adjust regex patterns/reasons. The template documents common scenarios (package installs, git resets, credential files) and defaults to `allow` when no rule matches. See [updates/decisions/0003-decision-policy-template.md](./updates/decisions/0003-decision-policy-template.md) for full guidance.
+
+**Built-in tags** (usable in the `tags` array):
+
+- `system:dangerous` → matches destructive commands like `rm -rf /`, `shutdown`, `reboot` (severity `critical`).
+- `package:install` → package manager installs/updates (`npm install`, `pip install`, `uv pip`, …) (severity `medium`).
+- `git:destructive` → state-resetting git commands (`git reset --hard`, `git clean -fd`, …) (severity `high`).
+- `secrets:file` → credential/secret file paths (`.env`, `id_rsa`, `*.pem`) (severity `high`).
+- `dependency:lock` → dependency lock files (`package-lock.json`, `poetry.lock`, `requirements.txt`) (severity `medium`).
+
+Add your own regex alongside tags for project-specific needs; unknown tags are ignored with no errors.
+
 ## Audio Files
 
-You'll need to provide your own .wav audio files in the `.claude/sounds/` directory:
-- `task_complete.wav` - Played when tasks complete
-- `agent_complete.wav` - Played when subagents finish
-- `user_prompt.wav` - Played for user notifications
+Provide your own `.wav` files in `.claude/sounds/`:
+
+- `task_complete.wav` – Played for Stop events
+- `agent_complete.wav` – Played for SubagentStop events
+- `user_prompt.wav` – Played for Notifications
 
 ## Testing
 
@@ -86,7 +108,7 @@ pip install -U pytest && pytest -q .claude/hooks/tests
 
 Notes:
 - Tests default to a no-op player via `AUDIO_PLAYER_CMD=true` so they don't require system audio.
-- To exercise real playback locally, unset that env and ensure `.claude/sounds/` contains the wav files.
+- Integration tests verify `.claude/settings.json` routes all events through Herald and that decision policies trigger correctly.
 
 ## License
 
@@ -98,12 +120,7 @@ This project was inspired by Claude Code's hook system examples and the [claude-
 
 ## Output & Environment
 
-- JSON-only output: each hook prints a single JSON object with `hookSpecificOutput`.
-
-```
-{"hookSpecificOutput": {"hookEventName": "UserNotification", "status": "completed", "audioPlayed": true, "throttled": false, "notes": []}}
-```
-
+- JSON-only output: each hook prints a single JSON object (e.g. `{"continue": true}` or decision payloads).
 - Environment overrides: set audio folder via environment (takes precedence over config)
   - `CLAUDE_SOUNDS_DIR` or `AUDIO_SOUNDS_DIR`
   - Example:
@@ -114,27 +131,14 @@ export CLAUDE_SOUNDS_DIR="/absolute/path/to/sounds"
 
 ## CLI Examples
 
-- Notification (play sound):
-
-
-```
-echo '{}' | uv run .claude/hooks/notification.py --enable-audio
-# or
-echo '{}' | python3 .claude/hooks/notification.py --enable-audio
-```
-
-- Task complete (play sound):
+- Herald dispatcher (Notification):
 
 ```
-echo '{}' | uv run .claude/hooks/stop.py --enable-audio
-# or
-echo '{}' | python3 .claude/hooks/stop.py --enable-audio
+echo '{"message": "Hi"}' | uv run .claude/hooks/herald.py --hook Notification --enable-audio
 ```
 
-- Subagent complete (play sound):
+- PreToolUse policy check:
 
 ```
-echo '{}' | uv run .claude/hooks/subagent_stop.py --enable-audio
-# or
-echo '{}' | python3 .claude/hooks/subagent_stop.py --enable-audio
+echo '{"tool": "bash", "toolInput": {"command": "rm -rf /"}}' | uv run .claude/hooks/herald.py --hook PreToolUse
 ```

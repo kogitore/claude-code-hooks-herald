@@ -6,19 +6,19 @@ Commit messages are recommended to follow [Conventional Commits](https://www.con
 
 ## [Unreleased]
 ### Added
-- Support additional official hook event types
-- Audio layering and custom sound file support
-- More platform audio backends (PulseAudio, ALSA)
-- Established bilingual `/updates` document structure and index
-- Documented uv and system audio prerequisites in the README set
+- Herald dispatcher (`.claude/hooks/herald.py`) with Decision API integration for Pre/PostToolUse and Stop events.
+- BaseHook framework plus Notification/Stop/SubagentStop implementations that reuse shared audio handling.
+- Configurable `decision_policy.json` (with `decision_policy.example.json` template + ADR 0003) to extend allow/deny/ask/block rules without losing built-in safeguards.
+- TagMatcher library (`system:dangerous`, `package:install`, `git:destructive`, etc.) with severity ranking for policy responses; ADR 0004 documents the design.
+- End-to-end tests covering dispatcher routing, settings.json wiring, and decision policy outcomes.
 
 ### Changed
-- Tuned default volume and throttling strategy
-- Improved cross-platform audio backend selection logic
+- `.claude/settings.json` now routes all official events through the Herald dispatcher.
+- README (EN/繁中) updated to describe dispatcher architecture, Decision API, and CLI usage.
+- Roadmap v1.3 Phase 1 tasks marked completed for dispatcher, BaseHook, Decision API, and migration work.
 
 ### Fixed
-- Provide clearer error messages when audio files are missing
-- Improve stability of Windows volume control
+- Ensured CLI hooks emit minimal JSON (`{"continue": true}`) while telemetry stays on stderr.
 
 ---
 

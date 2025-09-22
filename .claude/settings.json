@@ -1,41 +1,25 @@
 {
   "hooks": {
-    "Notification": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd $CLAUDE_PROJECT_DIR && uv run .claude/hooks/notification.py --enable-audio"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd $CLAUDE_PROJECT_DIR && uv run .claude/hooks/stop.py --enable-audio"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd $CLAUDE_PROJECT_DIR && uv run .claude/hooks/subagent_stop.py --enable-audio"
-          }
-        ]
-      }
-    ]
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "bun x ccusage statusline"
+    "Notification": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook Notification --enable-audio"
+      }]
+    }],
+    "Stop": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook Stop --enable-audio"
+      }]
+    }],
+    "SubagentStop": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook SubagentStop --enable-audio"
+      }]
+    }]
   }
 }
