@@ -27,12 +27,19 @@ def main() -> int:
     args = ap.parse_args()
 
     tests = [
+        # 現有測試
         ".claude/hooks/tests/test_notification.py",
         ".claude/hooks/tests/test_stop.py",
         ".claude/hooks/tests/test_subagent_stop.py",
         ".claude/hooks/tests/test_throttle.py",
         ".claude/hooks/tests/test_json_only.py",
         ".claude/hooks/tests/test_audio_played_and_timeout.py",
+        # 新增模組測試
+        ".claude/hooks/tests/test_session_storage.py",
+        ".claude/hooks/tests/test_user_prompt_submit.py",
+        ".claude/hooks/tests/test_pre_tool_use.py",
+        ".claude/hooks/tests/test_post_tool_use.py",
+        ".claude/hooks/tests/test_session_management.py",
     ]
 
     rc_accum = 0
