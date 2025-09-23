@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import pytest
+from common_test_utils import run_hook
+import json
 
 
 HOOKS_DIR = Path(__file__).resolve().parents[1]
@@ -129,3 +131,36 @@ def test_middleware_can_stop_dispatch():
     assert report.audio_played is False
     assert report.throttled is False
     assert report.handler_name == handler.__name__
+
+
+def test_herald_cli_interface_basic():
+    """Tests the basic CLI execution of herald.py."""
+    result = run_hook(
+        ".claude/hooks/herald.py",
+        payload={"message": "CLI test"},
+        args=["--hook", "Notification", "--enable-audio"]
+    )
+    assert result.returncode == 0
+    # stderr should contain the debug report
+    assert "[Herald] event=Notification" in result.stderr
+    assert "handler=" in result.stderr
+    assert "handled=True" in result.stderr
+    # stdout should contain the JSON response
+    assert '"continue": true' in result.stdout
+    # Ensure it's valid JSON
+    assert json.loads(result.stdout) == {"continue": True}
+
+
+def test_herald_cli_interface_invalid_hook():
+    """Tests the CLI with an invalid or unhandled hook name."""
+    result = run_hook(
+        ".claude/hooks/herald.py",
+        payload={},
+        args=["--hook", "InvalidHookName"]
+    )
+    assert result.returncode == 0
+    assert "[Herald] event=InvalidHookName" in result.stderr
+    assert "[Herald] handler=none" in result.stderr
+    assert "[Herald] handled=False" in result.stderr
+    # The default response should still be a valid continue
+    assert json.loads(result.stdout) == {"continue": True}

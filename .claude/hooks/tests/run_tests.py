@@ -35,11 +35,14 @@ def main() -> int:
         ".claude/hooks/tests/test_json_only.py",
         ".claude/hooks/tests/test_audio_played_and_timeout.py",
         # 新增模組測試
+        ".claude/hooks/tests/test_constants.py",
         ".claude/hooks/tests/test_session_storage.py",
         ".claude/hooks/tests/test_user_prompt_submit.py",
         ".claude/hooks/tests/test_pre_tool_use.py",
         ".claude/hooks/tests/test_post_tool_use.py",
         ".claude/hooks/tests/test_session_management.py",
+        # Herald dispatcher 測試 (包含 CLI 測試)
+        ".claude/hooks/tests/test_dispatcher.py",
     ]
 
     rc_accum = 0
