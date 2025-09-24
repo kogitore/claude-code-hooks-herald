@@ -115,6 +115,8 @@ class DecisionAPI:
     def __init__(self, config_manager: Optional[ConfigManager] = None, policy_path: Optional[Path] = None) -> None:
         # 優先使用傳入的 config_manager
         self.config_manager = config_manager or ConfigManager.get_instance()
+        # Back-compat: some tests expect `_config_manager`
+        self._config_manager = self.config_manager
         self.policy_path = policy_path or self._default_policy_path()
         
         # 簡化的政策載入

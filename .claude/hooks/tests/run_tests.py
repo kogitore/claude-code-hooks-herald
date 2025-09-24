@@ -7,6 +7,7 @@ This runner invokes the existing test scripts under 'test/' to avoid churn.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -52,6 +53,11 @@ def main() -> int:
     ]
 
     rc_accum = 0
+    hooks_root = repo_root() / ".claude" / "hooks"
+    base_env = os.environ.copy()
+    # Prepend hooks_root to PYTHONPATH so 'utils' package resolves in tests
+    base_env["PYTHONPATH"] = str(hooks_root) + (os.pathsep + base_env["PYTHONPATH"] if base_env.get("PYTHONPATH") else "")
+
     for t in tests:
         cmd = [sys.executable, str(repo_root() / t)]
         if args.demo_sound:
@@ -59,7 +65,7 @@ def main() -> int:
         if args.sounds:
             cmd.extend(["--sounds", args.sounds])
         print(f"\n>>> Running {t}")
-        rc = subprocess.call(cmd)
+        rc = subprocess.call(cmd, env=base_env)
         rc_accum |= (rc & 0xFF)
 
     print(f"\nAll tests done. aggregate_rc={rc_accum}")
