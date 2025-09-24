@@ -1,57 +1,13 @@
 #!/usr/bin/env python3
-"""SessionEnd hook for session cleanup and finalization.
+"""SessionEnd hook — minimal.
 
-This hook is triggered when a Claude Code session ends and handles:
-- Session cleanup and resource deallocation
-- Final data persistence and backup
-- Usage statistics and reporting
-- Farewell notifications and audio cues
+Kept:
+ - resource cleanup within session directory
+ - state update + event log append
+ - JSON additionalContext with removed/skipped
+ - audio_type flag
 
-IMPLEMENTATION REQUIREMENTS for Codex:
-1. Inherit from BaseHook with default_audio_event = "SessionEnd"
-2. Implement handle_hook_logic() method that:
-   - Performs session cleanup and resource deallocation
-   - Saves session data and statistics
-   - Clears temporary files and caches
-   - Returns HookExecutionResult with cleanup status
-3. Handle session teardown tasks:
-   - Clean up temporary files and directories
-   - Save session state and preferences
-   - Generate session summary and statistics
-   - Release system resources
-4. Audio integration:
-   - Session completion notification sounds
-   - Different cues for normal vs. error termination
-   - Final confirmation of successful cleanup
-
-CONTEXT FORMAT:
-{
-    "session_id": "uuid-string",
-    "user_id": "uuid-string",
-    "end_time": "2025-01-01T00:00:00Z",
-    "duration": 3600,  // seconds
-    "termination_reason": "normal|error|timeout|forced",
-    "statistics": {
-        "tools_used": 42,
-        "prompts_submitted": 15,
-        "errors_encountered": 2
-    },
-    "resources_to_cleanup": [
-        "/tmp/session-uuid/...",
-        "cache_entries",
-        ...
-    ]
-}
-
-CRITICAL NOTES:
-- Session cleanup should be reliable even in error conditions
-- Save important session data before cleanup
-- Handle partial cleanup scenarios gracefully
-- Consider data privacy when saving session information
-- Be prepared for interrupted or forced terminations
-- Provide clear feedback for cleanup status
-- Handle concurrent session end scenarios
-- Consider session data archival policies
+Removed: walls of aspirational nonsense.
 """
 from __future__ import annotations
 
@@ -59,7 +15,6 @@ import argparse
 import json
 import shutil
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -67,32 +22,22 @@ from utils.constants import SESSION_END
 from utils.session_storage import load_state, write_state, append_event_log
 
 
-# --- Function-based simple handler for dispatcher ---------------------------
 def handle_session_end(context) -> "HandlerResult":  # type: ignore[name-defined]
-    from herald import HandlerResult  # local import to avoid circulars
+    from herald import HandlerResult
     hr = HandlerResult()
     hr.audio_type = SESSION_END
     try:
-        result = _finalise_session(context.payload if isinstance(context.payload, dict) else {})
+        summary_json = _finalise_session(context.payload if isinstance(context.payload, dict) else {})
         hr.response["hookSpecificOutput"] = {
             "hookEventName": SESSION_END,
-            "additionalContext": result.context,
+            "additionalContext": summary_json,
         }
     except Exception:
         pass
     return hr
 
 
-@dataclass
-class SessionEndResult:
-    context: str
-    removed_resources: Tuple[str, ...]
-    skipped_resources: Tuple[str, ...]
-
-
-    # Class-based hook removed in Phase 3
-
-def _finalise_session(context: Dict[str, Any]) -> SessionEndResult:
+def _finalise_session(context: Dict[str, Any]) -> str:
     session_id = context.get("session_id") or context.get("sessionId") or "unknown-session"
     if not isinstance(session_id, str):
         session_id = str(session_id)
@@ -148,7 +93,7 @@ def _finalise_session(context: Dict[str, Any]) -> SessionEndResult:
 
     context_str = json.dumps(summary, ensure_ascii=False)
 
-    return SessionEndResult(context=context_str, removed_resources=removed, skipped_resources=skipped)
+    return context_str
 
     # Properties removed with class
 
@@ -205,7 +150,7 @@ def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def main() -> int:  # pragma: no cover - simple CLI passthrough
+def main() -> int:  # pragma: no cover
     parser = argparse.ArgumentParser(description="Claude Code SessionEnd (function)")
     parser.add_argument("--enable-audio", action="store_true")
     _ = parser.parse_args()

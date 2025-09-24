@@ -1,49 +1,14 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook for user interaction processing and validation.
+"""UserPromptSubmit hook — minimal but preserves existing test expectations.
 
-This hook is triggered when a user submits a prompt and can implement:
-- Prompt validation and sanitization
-- User input logging and audit
-- Prompt preprocessing and enhancement
-- Rate limiting and abuse prevention
+Kept:
+- prompt extraction + truncation
+- suspicious pattern scan
+- simple rate limiting (per user/session)
+- issue aggregation → block + reason
+- audio only when issues present
 
-IMPLEMENTATION REQUIREMENTS for Codex:
-1. Inherit from BaseHook with default_audio_event = "UserPromptSubmit"
-2. Implement handle_hook_logic() method that:
-   - Extracts user prompt from context
-   - Validates and processes prompt content
-   - Applies user input policies
-   - Returns HookExecutionResult with processed prompt
-3. Handle prompt processing:
-   - Content validation and sanitization
-   - Length and complexity limits
-   - Abuse pattern detection
-   - User session rate limiting
-4. Audio integration:
-   - Feedback for prompt submission
-   - Different cues for validation failures
-   - Throttled to avoid audio spam
-
-CONTEXT FORMAT:
-{
-    "prompt": "User's input text...",
-    "user_id": "uuid-string",
-    "session_id": "uuid-string",
-    "timestamp": "2025-01-01T00:00:00Z",
-    "metadata": {
-        "length": 1234,
-        "language": "en",
-        "source": "cli|web|api"
-    }
-}
-
-CRITICAL NOTES:
-- Handle user privacy and data protection carefully
-- Implement prompt sanitization to prevent injection attacks
-- Consider rate limiting to prevent abuse
-- Log user interactions for audit but respect privacy
-- Should be fast to avoid user experience impact
-- Consider multilingual prompt processing
+Removed: bloated narrative docstring, dataclass, redundant layering.
 """
 from __future__ import annotations
 
@@ -52,7 +17,6 @@ import json
 import re
 import sys
 import time
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -73,74 +37,58 @@ SUSPICIOUS_PATTERNS = [
 ]
 
 
-@dataclass
-class PromptProcessingResult:
-    payload: Dict[str, Any]
-    should_alert: bool
-    issues: Tuple[str, ...]
-    prompt_preview: Optional[str]
+def _process_prompt(context: Dict[str, Any]) -> Tuple[Dict[str, Any], Tuple[str, ...], Optional[str], bool]:
+    prompt, issues = _extract_prompt(context)
+    metadata = context.get("metadata") if isinstance(context.get("metadata"), dict) else {}
+    user_id = context.get("user_id") or context.get("userId")
+    session_id = context.get("session_id") or context.get("sessionId")
+    timestamp = context.get("timestamp") if isinstance(context.get("timestamp"), str) else _utc_timestamp()
 
+    rate_issue = _check_rate_limit(user_id, session_id)
+    if rate_issue:
+        issues += (rate_issue,)
+    suspicious = _scan_prompt(prompt)
+    issues += suspicious
 
-def _process_prompt(context: Dict[str, Any]) -> PromptProcessingResult:
-        prompt, issues = _extract_prompt(context)
-        metadata = context.get("metadata") if isinstance(context.get("metadata"), dict) else {}
-        user_id = context.get("user_id") or context.get("userId")
-        session_id = context.get("session_id") or context.get("sessionId")
-        timestamp = context.get("timestamp") if isinstance(context.get("timestamp"), str) else _utc_timestamp()
+    truncated = False
+    sanitized = prompt.strip()
+    if len(sanitized) > MAX_PROMPT_LENGTH:
+        sanitized = sanitized[:MAX_PROMPT_LENGTH]
+        truncated = True
+        issues += ("prompt_truncated",)
 
-        rate_issue = _check_rate_limit(user_id, session_id)
-        if rate_issue:
-            issues += (rate_issue,)
-
-        suspicious = _scan_prompt(prompt)
-        issues += suspicious
-
-        truncated = False
-        sanitized_prompt = prompt.strip()
-        if len(sanitized_prompt) > MAX_PROMPT_LENGTH:
-            sanitized_prompt = sanitized_prompt[:MAX_PROMPT_LENGTH]
-            truncated = True
-            issues += ("prompt_truncated",)
-
-        should_alert = bool(issues)
-
-        payload = {
-            "userPrompt": {
-                "prompt": sanitized_prompt,
-                "truncated": truncated,
-                "length": len(sanitized_prompt),
-                "timestamp": timestamp,
-            }
+    should_alert = bool(issues)
+    payload = {
+        "userPrompt": {
+            "prompt": sanitized,
+            "truncated": truncated,
+            "length": len(sanitized),
+            "timestamp": timestamp,
         }
-        if user_id:
-            payload["userPrompt"]["userId"] = str(user_id)
-        if session_id:
-            payload["userPrompt"]["sessionId"] = str(session_id)
-        if metadata:
-            payload["userPrompt"]["metadata"] = metadata
-        if issues:
-            payload["userPrompt"]["issues"] = list(dict.fromkeys(issues))
-        if should_alert:
-            payload["userPrompt"]["requiresAttention"] = True
+    }
+    if user_id:
+        payload["userPrompt"]["userId"] = str(user_id)
+    if session_id:
+        payload["userPrompt"]["sessionId"] = str(session_id)
+    if metadata:
+        payload["userPrompt"]["metadata"] = metadata
+    if issues:
+        payload["userPrompt"]["issues"] = list(dict.fromkeys(issues))
+    if should_alert:
+        payload["userPrompt"]["requiresAttention"] = True
 
-        preview = sanitized_prompt[:MAX_PREVIEW] if sanitized_prompt else None
+    preview = sanitized[:MAX_PREVIEW] if sanitized else None
 
-        _record_submission(
-            {
-                "timestamp": timestamp,
-                "userId": user_id,
-                "sessionId": session_id,
-                "length": len(sanitized_prompt),
-                "issues": list(dict.fromkeys(issues)),
-            }
-        )
-
-        return PromptProcessingResult(
-            payload=payload,
-            should_alert=should_alert,
-            issues=issues,
-            prompt_preview=preview,
-        )
+    _record_submission(
+        {
+            "timestamp": timestamp,
+            "userId": user_id,
+            "sessionId": session_id,
+            "length": len(sanitized),
+            "issues": list(dict.fromkeys(issues)),
+        }
+    )
+    return payload, issues, preview, should_alert
 
 
 def _extract_prompt(context: Dict[str, Any]) -> Tuple[str, Tuple[str, ...]]:
@@ -212,38 +160,32 @@ def _utc_timestamp() -> str:
 
 # --- Function-based simple handler for dispatcher ---------------------------
 def handle_user_prompt_submit(context) -> "HandlerResult":  # type: ignore[name-defined]
-    from herald import HandlerResult  # local import to avoid circulars
-
+    from herald import HandlerResult
     payload: Dict[str, Any] = context.payload if isinstance(context.payload, dict) else {}
-
-    # Process prompt using shared helper
-    processed = _process_prompt(payload)
-    context_payload = {
-        "promptPreview": processed.prompt_preview,
-        "issues": list(processed.issues),
+    processed_payload, issues, preview, should_alert = _process_prompt(payload)
+    base = processed_payload.get("userPrompt", {})
+    ctx = {
+        "promptPreview": preview,
+        "issues": list(issues),
         "timestamp": _utc_timestamp(),
+        **{k: v for k, v in base.items() if k not in {"issues", "requiresAttention"}},
     }
-    payload_data = processed.payload.get("userPrompt", {}) if isinstance(processed.payload, dict) else {}
-    context_payload.update({k: v for k, v in payload_data.items() if k not in {"issues", "requiresAttention"}})
-
     hr = HandlerResult()
-    hr.decision_payload = {"additionalContext": context_payload}
-    if processed.issues:
-        readable = ", ".join(issue.replace("_", " ") for issue in processed.issues)
+    hr.decision_payload = {"additionalContext": ctx}
+    if issues:
         hr.decision_payload["decision"] = "block"
-        hr.decision_payload["reason"] = f"Issues detected: {readable}"
+        hr.decision_payload["reason"] = "Issues detected: " + ", ".join(i.replace("_", " ") for i in issues)
         hr.continue_value = False
     else:
         hr.continue_value = True
-
-    if processed.should_alert:
+    if should_alert:
         hr.audio_type = USER_PROMPT_SUBMIT
     else:
         hr.suppress_audio = True
     return hr
 
 
-def main() -> int:  # pragma: no cover - simple CLI passthrough
+def main() -> int:  # pragma: no cover
     parser = argparse.ArgumentParser(description="Claude Code UserPromptSubmit (function)")
     parser.add_argument("--enable-audio", action="store_true")
     _ = parser.parse_args()
