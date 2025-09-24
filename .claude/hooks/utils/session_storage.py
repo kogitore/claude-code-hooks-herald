@@ -1,57 +1,49 @@
 #!/usr/bin/env python3
-"""Shared session storage helpers for Claude Code hooks."""
+"""Minimal no-op session storage to keep imports working during Phase 1.
+This replaces the over-engineered session_storage with simple stubs.
+"""
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from typing import Dict, Any
 from pathlib import Path
-from typing import Any, Dict
 
-_LOGS_ROOT = Path(__file__).resolve().parents[2] / "logs"
-STATE_PATH: Path = _LOGS_ROOT / "session_state.json"
-EVENT_LOG_PATH: Path = _LOGS_ROOT / "session_events.jsonl"
+# Default paths under logs/ for compatibility
+_LOGS_ROOT = Path(__file__).resolve().parents[3] / "logs"
+STATE_PATH = _LOGS_ROOT / "session_state.json"
+EVENT_LOG_PATH = _LOGS_ROOT / "session_events.jsonl"
 
 
 def utc_timestamp() -> str:
-    """Generate a UTC ISO 8601 timestamp string."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def load_state() -> Dict[str, Any]:
-    """Load the persisted session state map."""
-    if not STATE_PATH.exists():
-        return {}
     try:
-        content = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return content if isinstance(content, dict) else {}
+        if STATE_PATH.exists():
+            with open(STATE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+    except Exception:
+        pass
+    return {}
 
 
 def write_state(state: Dict[str, Any]) -> None:
-    """Persist the session state map to disk."""
     try:
-        _LOGS_ROOT.mkdir(parents=True, exist_ok=True)
-        STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    except OSError:
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except Exception:
         pass
 
 
-def append_event_log(record: Dict[str, Any]) -> None:
-    """Append a single event record to the session log."""
+def append_event_log(entry: Dict[str, Any]) -> None:
     try:
-        _LOGS_ROOT.mkdir(parents=True, exist_ok=True)
-        with EVENT_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except OSError:
+        EVENT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(EVENT_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
         pass
-
-
-__all__ = [
-    "EVENT_LOG_PATH",
-    "STATE_PATH",
-    "append_event_log",
-    "load_state",
-    "utc_timestamp",
-    "write_state",
-]

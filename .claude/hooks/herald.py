@@ -24,18 +24,14 @@ from typing import Any, Callable, Dict, List, MutableMapping, Optional, Protocol
 
 from utils import constants
 from utils.audio_manager import AudioManager
-from utils.audio_dispatcher import AudioDispatcher
-from utils.middleware_runner import MiddlewareRunner
 from utils.common_io import generate_audio_notes, parse_stdin
 from utils.decision_api import DecisionAPI
-from utils.handler_registry import HandlerRegistry, HandlerEntry
 from notification import NotificationHook
 from post_tool_use import PostToolUseHook
 from pre_tool_use import PreToolUseHook
 from session_end import SessionEndHook
 from session_start import SessionStartHook
 from stop import StopHook
-from subagent_stop import SubagentStopHook
 from user_prompt_submit import UserPromptSubmitHook
 
 
@@ -147,15 +143,12 @@ class HeraldDispatcher:
         audio_manager: Optional[AudioManager] = None,
         decision_api: Optional[DecisionAPI] = None,
     ):
-        self.handler_registry = HandlerRegistry()  # 新增：處理器註冊管理器
         self.audio_manager = audio_manager or AudioManager()
-        self.audio_dispatcher = AudioDispatcher(self.audio_manager)
-        self.middleware_runner = MiddlewareRunner()  # 新增：中間件執行引擎
         self.decision_api = decision_api or DecisionAPI()
         
-        # 保持向後兼容性的屬性
-        self.event_handlers = self.handler_registry.event_handlers
-        self.middleware_chain = self.handler_registry.middleware_chain
+        # Simple handler dictionary - no registry pattern bullshit
+        self.event_handlers: Dict[str, HandlerCallable] = {}
+        self.middleware_chain: List[Any] = []  # Unused but kept for compatibility
 
     # -- Registration (委派給 HandlerRegistry) -------------------------------
     def register_handler(
@@ -168,19 +161,12 @@ class HeraldDispatcher:
         throttle_window: Optional[int] = None,
         throttle_key_factory: Optional[Callable[[DispatchContext], Optional[str]]] = None,
     ) -> None:
-        """委派處理器註冊到 HandlerRegistry"""
-        return self.handler_registry.register_handler(
-            event_type, 
-            handler, 
-            name=name, 
-            audio_type=audio_type,
-            throttle_window=throttle_window, 
-            throttle_key_factory=throttle_key_factory
-        )
+        """Simple handler registration - just store in dictionary"""
+        self.event_handlers[event_type] = handler
 
-    def register_middleware(self, middleware: MiddlewareCallable, *, name: Optional[str] = None) -> None:
-        """委派中間件註冊到 HandlerRegistry"""
-        return self.handler_registry.register_middleware(middleware, name=name)
+    def register_middleware(self, middleware: Any, *, name: Optional[str] = None) -> None:
+        """Middleware registration - ignored for now, will be removed in Phase 3"""
+        pass  # Middleware is bullshit - ignore it
 
     # -- Dispatch ---------------------------------------------------------
     def dispatch(
@@ -203,63 +189,61 @@ class HeraldDispatcher:
             decision_api=self.decision_api,
         )
 
-        handler_entry = self.event_handlers.get(event_type)
-        handler_name = handler_entry.name if handler_entry else None
-
-        # Pre-handler middleware execution
-        context = self.middleware_runner.run_middleware(self.middleware_chain, context)
-
+        # Direct handler lookup and invocation (no middleware/registry bullshit)
+        handler = self.event_handlers.get(event_type)
+        handler_name = getattr(handler, "__name__", None)
         handled = False
         handler_response = HandlerResult()
 
-        if not context.stop_dispatch and handler_entry:
+        if handler and not context.stop_dispatch:
             try:
-                maybe_response = handler_entry.handler(context)
+                maybe_response = handler(context)
                 if isinstance(maybe_response, HandlerResult):
                     handler_response = maybe_response
                 elif isinstance(maybe_response, dict):
                     handler_response.response.update(maybe_response)
                 handled = True
             except Exception as exc:  # pragma: no cover - defensive path
-                context.errors.append(f"handler:{handler_entry.name} - {exc}")
+                context.errors.append(f"handler:{handler_name or 'unknown'} - {exc}")
 
-        resolved_audio_type = (
-            handler_response.audio_type
-            or context.audio_type
-            or (handler_entry.audio_type if handler_entry else None)
-            or event_type
-        )
+        # Resolve audio type and throttling window
+        resolved_audio_type = handler_response.audio_type or context.audio_type or event_type
         if handler_response.suppress_audio:
             resolved_audio_type = None
 
         throttle_window = handler_response.throttle_window
-        if throttle_window is None and handler_entry:
-            throttle_window = handler_entry.throttle_window
         if throttle_window is None:
             throttle_window = DEFAULT_THROTTLE_WINDOWS.get(resolved_audio_type or "", 0)
 
-        throttle_key = (
-            handler_response.throttle_key
-            or context.throttle_key
-            or (handler_entry.throttle_key_factory(context) if handler_entry and handler_entry.throttle_key_factory else None)
-        )
-        # 使用 AudioDispatcher 處理音頻邏輯 (階段 1 重構)
-        audio_report = self.audio_dispatcher.handle_audio(
-            context, 
-            handler_response, 
-            enable_audio=enable_audio
-        )
-        
-        # 從 AudioReport 提取兼容的變數（向後兼容）
-        audio_played = audio_report.played
-        audio_path = audio_report.audio_path
-        throttled = audio_report.throttled
-        resolved_audio_type = audio_report.resolved_audio_type
-        
-        # 將音頻註記和錯誤添加到 context
-        context.notes.extend(audio_report.notes)
-        context.errors.extend(audio_report.errors)
+        throttle_key = handler_response.throttle_key or context.throttle_key or _default_throttle_key(context, resolved_audio_type)
 
+        # Perform audio playback directly via AudioManager with throttling
+        audio_played = False
+        audio_path = None
+        throttled = False
+        if resolved_audio_type:
+            # Check throttle
+            if throttle_window > 0 and throttle_key:
+                throttled = self.audio_manager.should_throttle_safe(throttle_key, throttle_window)
+            if not throttled:
+                played, path, _ctx = self.audio_manager.play_audio_safe(resolved_audio_type, enabled=enable_audio, additional_context={
+                    "eventType": event_type,
+                    "marker": marker,
+                })
+                audio_played = played
+                audio_path = path
+                # Mark emission only if we acted
+                if throttle_window > 0 and throttle_key:
+                    self.audio_manager.mark_emitted_safe(throttle_key)
+            # Notes for debug
+            context.notes.extend(generate_audio_notes(
+                throttled=throttled,
+                path=audio_path,
+                played=audio_played,
+                enabled=enable_audio,
+                throttle_msg=f"Throttled {resolved_audio_type} for {throttle_window}s"
+            ))
+        # Handler notes
         context.notes.extend(handler_response.notes)
 
         response = {"continue": handler_response.continue_value}
@@ -351,7 +335,6 @@ def build_default_dispatcher(
 
     notification_hook = NotificationHook(audio_manager=dispatcher.audio_manager)
     stop_hook = StopHook(audio_manager=dispatcher.audio_manager)
-    subagent_hook = SubagentStopHook(audio_manager=dispatcher.audio_manager)
     pre_tool_use_hook = PreToolUseHook(
         audio_manager=dispatcher.audio_manager,
         decision_api=dispatcher.decision_api,
@@ -413,7 +396,7 @@ def build_default_dispatcher(
 
     dispatcher.register_handler(constants.NOTIFICATION, _hook_handler(constants.NOTIFICATION, notification_hook), audio_type=constants.NOTIFICATION)
     dispatcher.register_handler(constants.STOP, lambda ctx: _stop_handler(ctx, stop_hook), audio_type=constants.STOP)
-    dispatcher.register_handler(constants.SUBAGENT_STOP, lambda ctx: _stop_handler(ctx, subagent_hook), audio_type=constants.SUBAGENT_STOP)
+    dispatcher.register_handler(constants.SUBAGENT_STOP, lambda ctx: _stop_handler(ctx, stop_hook), audio_type=constants.SUBAGENT_STOP)
     dispatcher.register_handler(constants.PRE_TOOL_USE, _hook_handler(constants.PRE_TOOL_USE, pre_tool_use_hook), audio_type=constants.PRE_TOOL_USE, throttle_window=pre_tool_use_hook.default_throttle_seconds)
     dispatcher.register_handler(constants.POST_TOOL_USE, _hook_handler(constants.POST_TOOL_USE, post_tool_use_hook), audio_type=constants.POST_TOOL_USE, throttle_window=post_tool_use_hook.default_throttle_seconds)
     dispatcher.register_handler(constants.SESSION_START, _hook_handler(constants.SESSION_START, session_start_hook), audio_type=constants.SESSION_START, throttle_window=session_start_hook.default_throttle_seconds)

@@ -1,270 +1,83 @@
 #!/usr/bin/env python3
-"""Base hook framework for Claude Code audio hooks.
-
-This module provides the BaseHook abstraction referenced in Phase 1 of the
-roadmap. It centralises the common control flow for validating inputs,
-executing hook logic, graceful error handling, and optional audio playback via
-`AudioManager`. Concrete hooks should inherit from `BaseHook` and implement the
-abstract methods defined here while keeping their own modules thin.
 """
-from __future__ import annotations
-
-import abc
-import hashlib
+Temporary simplified BaseHook - compatibility shim during Phase 1 cleanup.
+Goal: keep existing hooks running while audio/middleware layers are removed.
+Important: this BaseHook does NOT play audio; dispatcher is responsible.
+"""
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, List
 import json
-import sys
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
-from .audio_manager import AudioManager
-from .common_io import generate_audio_notes
 
 
 @dataclass
 class HookExecutionResult:
-    """Encapsulates the outcome of a hook execution cycle.
-    
-    Goal 3: Enhanced with additionalContext for structured communication.
-    """
+    """Simple result class for hook execution"""
+    # Execution payload for JSON response (hooks often clear this)
+    payload: Dict[str, Any] = None  # type: ignore[assignment]
+    # Notes/errors for debug logging
+    notes: List[str] = None  # type: ignore[assignment]
+    errors: List[str] = None  # type: ignore[assignment]
 
-    continue_value: bool = True
-    payload: Dict[str, Any] = field(default_factory=dict)
+    # Audio-related fields (dispatcher will fill these later)
+    audio_played: bool = False
+    throttled: bool = False
     audio_type: Optional[str] = None
     throttle_key: Optional[str] = None
     throttle_window: Optional[int] = None
-    audio_played: bool = False
     audio_path: Optional[Path] = None
-    throttled: bool = False
-    notes: List[str] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
-    # Goal 3: Additional context for structured hook communication
-    additional_context: Dict[str, Any] = field(default_factory=dict)
-    audio_context: Dict[str, Any] = field(default_factory=dict)
 
-    def build_response(self) -> Dict[str, Any]:
-        """Build response with Goal 3 additionalContext support."""
-        response = {"continue": self.continue_value}
-        response.update(self.payload)
-        
-        # Goal 3: Include additionalContext in response for structured communication
-        if self.additional_context or self.audio_context:
-            context = {}
-            context.update(self.additional_context)
-            if self.audio_context:
-                context["audioContext"] = self.audio_context
-            response["additionalContext"] = context
-            
-        return response
+    # Decision-related fields (security hooks)
+    blocked: bool = False
+    decision_payload: Optional[Dict[str, Any]] = None
+    # Continue flag for dispatcher mapping
+    continue_value: bool = True
 
 
-class BaseHook(abc.ABC):
-    """Abstract base class for Claude Code audio hooks."""
+class BaseHook:
+    """
+    Temporary base class for hooks - WILL BE DELETED in Phase 3
+    This exists only to keep existing hooks working during refactoring
+    """
+    
+    def __init__(self, audio_manager=None):
+        self.audio_manager = audio_manager
+        self.default_audio_event = None
+        self.default_throttle_seconds = 0
+    
+    def execute(self, payload: Dict[str, Any], enable_audio: bool = True, **_: Any) -> HookExecutionResult:
+        """Execute the hook logic and return meta for dispatcher-driven audio."""
+        # Process hook-specific logic (usually returns {})
+        payload = payload or {}
+        processed = self.process(payload)
 
-    default_audio_event: Optional[str] = None
-    default_throttle_seconds: int = 0
-
-    def __init__(self, *, audio_manager: Optional[AudioManager] = None) -> None:
-        self.audio_manager = audio_manager or AudioManager()
-
-    # -- Contract methods -------------------------------------------------
-    @abc.abstractmethod
-    def validate_input(self, data: Dict[str, Any]) -> bool:
-        """Return True when the hook input is structurally valid."""
-
-    @abc.abstractmethod
-    def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute the hook's core logic and return additional payload fields."""
-
-    @abc.abstractmethod
-    def handle_error(self, error: Exception) -> Dict[str, Any]:
-        """Transform an exception into payload fields for graceful fallback."""
-
-    # -- Public API -------------------------------------------------------
-    def execute(
-        self,
-        data: Optional[Dict[str, Any]],
-        *,
-        enable_audio: bool = False,
-        audio_event: Optional[str] = None,
-        throttle_key: Optional[str] = None,
-        throttle_seconds: Optional[int] = None,
-        parsed_args: Optional[Any] = None,
-    ) -> HookExecutionResult:
-        payload = data or {}
-        result = HookExecutionResult()
-        try:
-            valid = self.validate_input(payload)
-        except Exception as exc:  # pragma: no cover - defensive path
-            return self._error_result(exc, result)
-
-        if not valid:
-            result.errors.append("input_validation_failed")
-            return result
-
-        try:
-            result = self.handle_hook_logic(payload, parsed_args=parsed_args)
-            if not isinstance(result, HookExecutionResult):
-                raise TypeError("handle_hook_logic must return HookExecutionResult")
-        except Exception as exc:
-            result = self._error_result(exc, result)
-        else:
-            event = audio_event or self.default_audio_event
-            if event:
-                self._attach_audio(
-                    result,
-                    event,
-                    enable_audio=enable_audio,
-                    throttle_key=throttle_key,
-                    throttle_seconds=throttle_seconds,
-                )
-        return result
-
-    def emit_json(self, result: HookExecutionResult) -> None:
-        """Print the JSON response and telemetry to `stderr` if present."""
-        try:
-            print(json.dumps(result.build_response()))
-        except Exception:  # pragma: no cover - final safety net
-            print(json.dumps({"continue": True}))
-
-        if result.notes or result.errors:
-            segments = ["[Hook]"]
-            if result.notes:
-                segments.append(f"notes={'|'.join(result.notes)}")
-            if result.errors:
-                segments.append(f"errors={'|'.join(result.errors)}")
-            try:
-                print(" ".join(segments), file=sys.stderr)
-            except Exception:  # pragma: no cover - diagnostic best effort
-                pass
-
-    # -- Internal helpers -------------------------------------------------
-    def _error_result(self, error: Exception, result: HookExecutionResult) -> HookExecutionResult:
-        result.errors.append(type(error).__name__)
-        try:
-            recovery = self.handle_error(error) or {}
-            if recovery:
-                result.payload.update(recovery)
-        except Exception:  # pragma: no cover - avoid cascading failures
-            pass
-        return result
-
-    def _attach_audio(
-        self,
-        result: HookExecutionResult,
-        audio_event: str,
-        *,
-        enable_audio: bool,
-        throttle_key: Optional[str],
-        throttle_seconds: Optional[int],
-    ) -> None:
-        window_default = throttle_seconds
-        if window_default is None:
-            window_default = self.default_throttle_seconds
-        window_default = int(window_default or 0)
-
-        window = self.audio_manager.get_throttle_window(audio_event, window_default)
-
-        throttle_key = throttle_key or self._default_throttle_key(audio_event, result)
-
-        played, path, throttled, audio_context = self._play_audio(
-            audio_event,
-            enable_audio=enable_audio,
-            throttle_key=throttle_key,
-            throttle_seconds=window,
+        # Prepare result; do NOT play audio here (dispatcher owns playback)
+        result = HookExecutionResult(
+            payload=dict(processed) if isinstance(processed, dict) else {},
+            notes=[],
+            errors=[],
         )
-
-        result.audio_type = audio_event
-        result.throttle_key = throttle_key
-        result.throttle_window = window
-        result.audio_played = played
-        result.audio_path = path
-        result.throttled = throttled
-        # Goal 3: Store audio context for structured communication
-        result.audio_context = audio_context
-        result.notes.extend(
-            generate_audio_notes(
-                throttled=throttled,
-                path=path,
-                played=played,
-                enabled=enable_audio,
-                throttle_msg=f"Throttled (<= {window}s)",
-            )
-        )
-
-    def _play_audio(
-        self,
-        audio_event: str,
-        *,
-        enable_audio: bool,
-        throttle_key: Optional[str],
-        throttle_seconds: int,
-    ) -> Tuple[bool, Optional[Path], bool, Dict[str, Any]]:
-        throttled = False
-        path = self.audio_manager.resolve_file(audio_event)
-        played = False
-        audio_context = {}
-        
-        if throttle_seconds > 0 and throttle_key:
-            throttled = self.audio_manager.should_throttle(throttle_key, throttle_seconds)
-            
-        if not throttled and enable_audio:
-            # Goal 3: Use enhanced play_audio with additionalContext support
-            additional_context = {
-                "hookType": self.__class__.__name__,
-                "throttleKey": throttle_key,
-                "throttleWindow": throttle_seconds,
-                "eventName": audio_event
-            }
-            played, path, audio_context = self.audio_manager.play_audio(
-                audio_event, 
-                enabled=True, 
-                additional_context=additional_context
-            )
-            if throttle_key:
-                self.audio_manager.mark_emitted(throttle_key)
-        else:
-            # Provide context even when not playing
-            audio_context = {
-                "audioType": audio_event,
-                "enabled": enable_audio,
-                "status": "throttled" if throttled else "disabled",
-                "hookType": self.__class__.__name__,
-                "filePath": str(path) if path else None
-            }
-                
-        return played, path, throttled, audio_context
-
-    def _default_throttle_key(self, audio_event: str, result: HookExecutionResult) -> str:
-        marker = None
-        if isinstance(result.payload, dict):
-            marker = result.payload.get("marker")
-            if not marker and audio_event.lower() == "notification":
-                message = result.payload.get("message")
-                if isinstance(message, str) and message.strip():
-                    digest = hashlib.sha1(message.encode("utf-8")).hexdigest()[:12]
-                    return f"Notification:{digest}"
-        marker = marker or "default"
-        return f"{audio_event}:{marker}"
-
-    # -- Extension hooks -------------------------------------------------
-    def handle_hook_logic(
-        self,
-        data: Dict[str, Any],
-        *,
-        parsed_args: Optional[Any] = None,
-    ) -> HookExecutionResult:
-        """Default hook execution pathway used by most hooks.
-
-        Subclasses can override this to gain full control over the
-        `HookExecutionResult`. When left untouched, it simply delegates to the
-        legacy `process()` implementation so existing hooks continue to work.
+        # Provide defaults used by dispatcher
+        result.audio_type = self.default_audio_event
+        if self.default_throttle_seconds > 0:
+            result.throttle_window = int(self.default_throttle_seconds)
+            result.throttle_key = self._default_throttle_key(result.audio_type or "default", result)
+        return result
+    
+    def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
+        Override this method in subclasses
+        Most hooks return {} - which shows they are useless
+        """
+        return {}
 
-        extra = self.process(data)
-        result = HookExecutionResult()
-        if extra:
-            if not isinstance(extra, dict):
-                raise TypeError("process() must return a dictionary payload")
-            result.payload.update(extra)
-        return result
+    # Compatibility: allow hooks to customize throttle key
+    def _default_throttle_key(self, audio_event: str, result: HookExecutionResult) -> str:  # noqa: ARG002
+        return f"{audio_event}:default"
+
+    # Minimal compatibility output helper used by some hook CLIs
+    def emit_json(self, result: HookExecutionResult) -> None:
+        try:
+            print(json.dumps({"continue": bool(getattr(result, "continue_value", True))}))
+        except Exception:
+            print('{"continue": true}')

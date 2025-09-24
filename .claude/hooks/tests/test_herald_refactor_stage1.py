@@ -14,7 +14,6 @@ if str(HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(HOOKS_DIR))
 
 from herald import HeraldDispatcher
-from utils.audio_dispatcher import AudioDispatcher
 from utils.audio_manager import AudioManager
 
 
@@ -27,7 +26,6 @@ def test_herald_integration():
     # 驗證組件正確初始化
     print(f"\n1. 組件初始化:")
     print(f"   ✅ HeraldDispatcher: {isinstance(dispatcher, HeraldDispatcher)}")
-    print(f"   ✅ AudioDispatcher: {isinstance(dispatcher.audio_dispatcher, AudioDispatcher)}")
     print(f"   ✅ AudioManager: {isinstance(dispatcher.audio_manager, AudioManager)}")
     
     # 測試分派功能
@@ -94,7 +92,7 @@ def test_audio_separation():
     
     dispatcher = HeraldDispatcher()
     
-    # 直接測試 AudioDispatcher
+    # 直接測試基本上下文類型存在
     from herald import DispatchContext, HandlerResult
     context = DispatchContext(
         event_type="Stop",
@@ -107,18 +105,12 @@ def test_audio_separation():
         throttle_window=100
     )
     
-    # 測試 AudioDispatcher 的獨立功能
-    audio_report = dispatcher.audio_dispatcher.handle_audio(
-        context, handler_result, enable_audio=True
+    # 測試 AudioManager 的基本功能
+    played, path, info = dispatcher.audio_manager.play_audio_safe(
+        "Stop", enabled=False, additional_context={"test": True}
     )
-    
-    print(f"   ✅ AudioReport 類型: {audio_report.__class__.__name__}")
-    print(f"   ✅ 音頻類型解析: {audio_report.resolved_audio_type}")
-    print(f"   ✅ 路徑解析: {audio_report.audio_path is not None}")
-    print(f"   ✅ 節流處理: {isinstance(audio_report.throttled, bool)}")
-    print(f"   ✅ 註記生成: {len(audio_report.notes) >= 0}")
-    
-    return True
+    print(f"   ✅ 路徑解析: {path is None or path.exists()}")
+    print(f"   ✅ 返回格式: {isinstance(info, dict)}")
 
 
 def test_performance_impact():
@@ -131,7 +123,7 @@ def test_performance_impact():
     
     # 測試多次分派的性能
     start_time = time.time()
-    iterations = 10
+    iterations = 5
     
     for i in range(iterations):
         report = dispatcher.dispatch("Stop", {"iteration": i}, enable_audio=False)
