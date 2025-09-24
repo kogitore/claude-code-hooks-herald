@@ -25,8 +25,10 @@ from typing import Any, Callable, Dict, List, MutableMapping, Optional, Protocol
 from utils import constants
 from utils.audio_manager import AudioManager
 from utils.audio_dispatcher import AudioDispatcher
+from utils.middleware_runner import MiddlewareRunner
 from utils.common_io import generate_audio_notes, parse_stdin
 from utils.decision_api import DecisionAPI
+from utils.handler_registry import HandlerRegistry, HandlerEntry
 from notification import NotificationHook
 from post_tool_use import PostToolUseHook
 from pre_tool_use import PreToolUseHook
@@ -110,15 +112,7 @@ class DispatchReport:
     blocked: bool
 
 
-@dataclass
-class HandlerEntry:
-    """Registration metadata for a handler."""
-
-    handler: HandlerCallable
-    name: str
-    audio_type: Optional[str] = None
-    throttle_window: Optional[int] = None
-    throttle_key_factory: Optional[Callable[[DispatchContext], Optional[str]]] = None
+# HandlerEntry 已移動到 utils.handler_registry
 
 
 DEFAULT_THROTTLE_WINDOWS: MutableMapping[str, int] = {
@@ -153,13 +147,17 @@ class HeraldDispatcher:
         audio_manager: Optional[AudioManager] = None,
         decision_api: Optional[DecisionAPI] = None,
     ):
-        self.event_handlers: Dict[str, HandlerEntry] = {}
-        self.middleware_chain: List[Tuple[str, MiddlewareCallable]] = []
+        self.handler_registry = HandlerRegistry()  # 新增：處理器註冊管理器
         self.audio_manager = audio_manager or AudioManager()
-        self.audio_dispatcher = AudioDispatcher(self.audio_manager)  # 新增：音頻分派器
+        self.audio_dispatcher = AudioDispatcher(self.audio_manager)
+        self.middleware_runner = MiddlewareRunner()  # 新增：中間件執行引擎
         self.decision_api = decision_api or DecisionAPI()
+        
+        # 保持向後兼容性的屬性
+        self.event_handlers = self.handler_registry.event_handlers
+        self.middleware_chain = self.handler_registry.middleware_chain
 
-    # -- Registration -----------------------------------------------------
+    # -- Registration (委派給 HandlerRegistry) -------------------------------
     def register_handler(
         self,
         event_type: str,
@@ -170,19 +168,19 @@ class HeraldDispatcher:
         throttle_window: Optional[int] = None,
         throttle_key_factory: Optional[Callable[[DispatchContext], Optional[str]]] = None,
     ) -> None:
-        if not isinstance(event_type, str) or not event_type:
-            raise ValueError("event_type must be a non-empty string")
-        entry = HandlerEntry(
-            handler=handler,
-            name=name or handler.__name__,
+        """委派處理器註冊到 HandlerRegistry"""
+        return self.handler_registry.register_handler(
+            event_type, 
+            handler, 
+            name=name, 
             audio_type=audio_type,
-            throttle_window=throttle_window,
-            throttle_key_factory=throttle_key_factory,
+            throttle_window=throttle_window, 
+            throttle_key_factory=throttle_key_factory
         )
-        self.event_handlers[event_type] = entry
 
     def register_middleware(self, middleware: MiddlewareCallable, *, name: Optional[str] = None) -> None:
-        self.middleware_chain.append((name or middleware.__name__, middleware))
+        """委派中間件註冊到 HandlerRegistry"""
+        return self.handler_registry.register_middleware(middleware, name=name)
 
     # -- Dispatch ---------------------------------------------------------
     def dispatch(
@@ -209,15 +207,7 @@ class HeraldDispatcher:
         handler_name = handler_entry.name if handler_entry else None
 
         # Pre-handler middleware execution
-        for mw_name, middleware in self.middleware_chain:
-            try:
-                result = middleware(context)
-                if isinstance(result, DispatchContext):
-                    context = result
-            except Exception as exc:  # pragma: no cover - defensive path
-                context.errors.append(f"middleware:{mw_name} - {exc}")
-            if context.stop_dispatch:
-                break
+        context = self.middleware_runner.run_middleware(self.middleware_chain, context)
 
         handled = False
         handler_response = HandlerResult()
