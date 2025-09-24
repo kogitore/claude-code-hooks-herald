@@ -26,12 +26,12 @@ from utils import constants
 from utils.audio_manager import AudioManager
 from utils.common_io import generate_audio_notes, parse_stdin
 from utils.decision_api import DecisionAPI
-from notification import NotificationHook
+from notification import handle_notification
 from post_tool_use import PostToolUseHook
 from pre_tool_use import PreToolUseHook
 from session_end import SessionEndHook
 from session_start import SessionStartHook
-from stop import StopHook
+from stop import handle_stop
 from user_prompt_submit import UserPromptSubmitHook
 
 
@@ -333,8 +333,7 @@ def build_default_dispatcher(
 ) -> HeraldDispatcher:
     dispatcher = HeraldDispatcher(audio_manager=audio_manager, decision_api=decision_api)
 
-    notification_hook = NotificationHook(audio_manager=dispatcher.audio_manager)
-    stop_hook = StopHook(audio_manager=dispatcher.audio_manager)
+    # Function-based simple handlers
     pre_tool_use_hook = PreToolUseHook(
         audio_manager=dispatcher.audio_manager,
         decision_api=dispatcher.decision_api,
@@ -358,26 +357,36 @@ def build_default_dispatcher(
 
     def _hook_handler(event_name: str, hook_instance):
         def handler(context: DispatchContext) -> HandlerResult:
-            result = hook_instance.execute(
-                context.payload,
-                enable_audio=context.enable_audio,
-                parsed_args=context.metadata.get("argv"),
-            )
-            hr = HandlerResult()
-            hr.continue_value = result.continue_value
-            hr.response.update(result.payload)
-            hr.audio_type = result.audio_type or event_name
-            hr.throttle_key = result.throttle_key
-            hr.throttle_window = result.throttle_window
-            hr.notes.extend(result.notes)
-            if result.errors:
-                context.errors.extend(result.errors)
-
-            last_decision = getattr(hook_instance, "_last_decision", None)
-            if last_decision is not None and hasattr(last_decision, "to_dict"):
-                hr.decision_payload = last_decision.to_dict()
-                hr.blocked = getattr(last_decision, "blocked", False)
-            return hr
+            # If hook_instance is a function, call directly
+            if callable(hook_instance):
+                maybe = hook_instance(context)
+                if isinstance(maybe, HandlerResult):
+                    return maybe
+            # Fallback for class-based hooks still using BaseHook
+            if hasattr(hook_instance, "execute"):
+                result = hook_instance.execute(
+                    context.payload,
+                    enable_audio=context.enable_audio,
+                    parsed_args=context.metadata.get("argv"),
+                )
+                hr = HandlerResult()
+                hr.continue_value = getattr(result, "continue_value", True)
+                if getattr(result, "payload", None):
+                    hr.response.update(result.payload)
+                hr.audio_type = getattr(result, "audio_type", None) or event_name
+                hr.throttle_key = getattr(result, "throttle_key", None)
+                hr.throttle_window = getattr(result, "throttle_window", None)
+                if getattr(result, "notes", None):
+                    hr.notes.extend(result.notes)
+                if getattr(result, "errors", None):
+                    context.errors.extend(result.errors)
+                # Try to capture decision payload if present
+                last_decision = getattr(hook_instance, "_last_decision", None)
+                if last_decision is not None and hasattr(last_decision, "to_dict"):
+                    hr.decision_payload = last_decision.to_dict()
+                    hr.blocked = getattr(last_decision, "blocked", False)
+                return hr
+            return HandlerResult()
 
         return handler
 
@@ -394,9 +403,9 @@ def build_default_dispatcher(
         hr.throttle_window = result.throttle_window
         return hr
 
-    dispatcher.register_handler(constants.NOTIFICATION, _hook_handler(constants.NOTIFICATION, notification_hook), audio_type=constants.NOTIFICATION)
-    dispatcher.register_handler(constants.STOP, lambda ctx: _stop_handler(ctx, stop_hook), audio_type=constants.STOP)
-    dispatcher.register_handler(constants.SUBAGENT_STOP, lambda ctx: _stop_handler(ctx, stop_hook), audio_type=constants.SUBAGENT_STOP)
+    dispatcher.register_handler(constants.NOTIFICATION, _hook_handler(constants.NOTIFICATION, handle_notification), audio_type=constants.NOTIFICATION)
+    dispatcher.register_handler(constants.STOP, _hook_handler(constants.STOP, handle_stop), audio_type=constants.STOP)
+    dispatcher.register_handler(constants.SUBAGENT_STOP, _hook_handler(constants.SUBAGENT_STOP, handle_stop), audio_type=constants.SUBAGENT_STOP)
     dispatcher.register_handler(constants.PRE_TOOL_USE, _hook_handler(constants.PRE_TOOL_USE, pre_tool_use_hook), audio_type=constants.PRE_TOOL_USE, throttle_window=pre_tool_use_hook.default_throttle_seconds)
     dispatcher.register_handler(constants.POST_TOOL_USE, _hook_handler(constants.POST_TOOL_USE, post_tool_use_hook), audio_type=constants.POST_TOOL_USE, throttle_window=post_tool_use_hook.default_throttle_seconds)
     dispatcher.register_handler(constants.SESSION_START, _hook_handler(constants.SESSION_START, session_start_hook), audio_type=constants.SESSION_START, throttle_window=session_start_hook.default_throttle_seconds)

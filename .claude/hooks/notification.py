@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Notification hook implemented via BaseHook and Decision API."""
+"""Notification hook - simplified function-based implementation.
+
+This module provides a simple handler for the Notification event that does not
+depend on BaseHook. It returns only the metadata needed by the dispatcher to
+play audio and produce the JSON response.
+"""
 from __future__ import annotations
 
 import argparse
@@ -7,49 +12,20 @@ import json
 import sys
 from typing import Dict, Optional
 
-from utils.base_hook import BaseHook, HookExecutionResult
 from utils.common_io import parse_stdin
 from utils.constants import NOTIFICATION
 
 
-class NotificationHook(BaseHook):
-    default_audio_event = NOTIFICATION
-    default_throttle_seconds = 30
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._last_payload: Dict[str, object] = {}
-
-    def execute(self, data: Optional[Dict[str, object]], **kwargs) -> HookExecutionResult:  # type: ignore[override]
-        self._last_payload = data or {}
-        result = super().execute(data, **kwargs)  # type: ignore[arg-type]
-        # 不回傳額外欄位，保持 JSON 精簡
-        result.payload.clear()
-        return result
-
-    def validate_input(self, data: Dict[str, object]) -> bool:
-        return isinstance(data, dict)
-
-    def process(self, data: Dict[str, object]) -> Dict[str, object]:
-        # Notification 不需要額外 payload
-        return {}
-
-    def handle_error(self, error: Exception) -> Dict[str, object]:
-        return {}
-
-    def _default_throttle_key(self, audio_event: str, result: HookExecutionResult) -> str:  # type: ignore[override]
-        marker = self._last_payload.get("marker")
-        if isinstance(marker, str) and marker.strip():
-            return f"{audio_event}:{marker}"
-        message = self._last_payload.get("message")
-        if isinstance(message, str) and message.strip():
-            import hashlib
-
-            digest = hashlib.sha1(message.encode("utf-8")).hexdigest()[:12]
-            return f"{audio_event}:{digest}"
-        return super()._default_throttle_key(audio_event, result)
+# Dispatcher-facing handler
+def handle_notification(context) -> "HandlerResult":  # type: ignore[name-defined]
+    from herald import HandlerResult  # local import to avoid circulars
+    hr = HandlerResult()
+    hr.audio_type = NOTIFICATION
+    # throttle window will be resolved by dispatcher defaults/config
+    return hr
 
 
+# Optional CLI for manual testing (plays audio directly when enabled)
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--enable-audio", dest="enable_audio", action="store_true", help="Enable actual audio playback")
@@ -57,20 +33,19 @@ def main() -> int:
     args = ap.parse_args()
 
     payload, _ = parse_stdin()
-    hook = NotificationHook()
-    result = hook.execute(payload, enable_audio=bool(args.enable_audio))
 
-    try:
-        print(
-            f"[Notification] audioPlayed={result.audio_played} throttled={result.throttled} "
-            f"path={result.audio_path} notes={result.notes}",
-            file=sys.stderr,
-        )
-    except Exception:
-        pass
+    # If audio is enabled, play the notification sound directly for manual runs
+    if args.enable_audio:
+        from utils.audio_manager import AudioManager
+
+        am = AudioManager()
+        am.play_audio_safe(NOTIFICATION, enabled=True, additional_context={"source": "notification_cli"})
 
     # JSON output contract
-    print(json.dumps({"continue": True}))
+    try:
+        print(json.dumps({"continue": True}))
+    except Exception:
+        print("{\"continue\": true}")
     return 0
 
 
