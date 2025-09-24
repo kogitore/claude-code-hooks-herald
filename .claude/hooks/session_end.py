@@ -63,10 +63,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from utils.base_hook import BaseHook, HookExecutionResult
-from utils.common_io import parse_stdin
 from utils.constants import SESSION_END
-from utils.session_storage import append_event_log, load_state, utc_timestamp, write_state
+from utils.session_storage import load_state, write_state, append_event_log
 
 
 # --- Function-based simple handler for dispatcher ---------------------------
@@ -74,6 +72,14 @@ def handle_session_end(context) -> "HandlerResult":  # type: ignore[name-defined
     from herald import HandlerResult  # local import to avoid circulars
     hr = HandlerResult()
     hr.audio_type = SESSION_END
+    try:
+        result = _finalise_session(context.payload if isinstance(context.payload, dict) else {})
+        hr.response["hookSpecificOutput"] = {
+            "hookEventName": SESSION_END,
+            "additionalContext": result.context,
+        }
+    except Exception:
+        pass
     return hr
 
 
@@ -84,120 +90,67 @@ class SessionEndResult:
     skipped_resources: Tuple[str, ...]
 
 
-class SessionEndHook(BaseHook):
-    """SessionEnd hook for session cleanup and finalization."""
+    # Class-based hook removed in Phase 3
 
-    default_audio_event = SESSION_END
-    default_throttle_seconds = 5
+def _finalise_session(context: Dict[str, Any]) -> SessionEndResult:
+    session_id = context.get("session_id") or context.get("sessionId") or "unknown-session"
+    if not isinstance(session_id, str):
+        session_id = str(session_id)
 
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._removed: Tuple[str, ...] = ()
-        self._skipped: Tuple[str, ...] = ()
+    end_time = context.get("end_time") if isinstance(context.get("end_time"), str) else _utc_timestamp()
+    duration = _parse_duration(context.get("duration"))
+    termination_reason = context.get("termination_reason") or context.get("reason") or "normal"
+    statistics = context.get("statistics") if isinstance(context.get("statistics"), dict) else {}
+    resources = context.get("resources_to_cleanup") or context.get("cleanup" ) or []
+    if not isinstance(resources, list):
+        resources = []
 
-    # -- BaseHook overrides ---------------------------------------------
-    def validate_input(self, data: Dict[str, Any]) -> bool:  # type: ignore[override]
-        return isinstance(data, dict)
+    removed, skipped = _cleanup_resources(session_id, resources)
 
-    def process(self, data: Dict[str, Any]) -> Dict[str, Any]:  # type: ignore[override]
-        """Legacy compatibility path (unused)."""
-        return {}
-
-    def handle_error(self, error: Exception) -> Dict[str, Any]:  # type: ignore[override]
-        self._removed = ()
-        self._skipped = ("cleanup_exception",)
-        return {
-            "sessionSummary": {
-                "status": "error",
-                "reason": type(error).__name__,
-            }
-        }
-
-    # -- Custom behaviour -----------------------------------------------
-    def handle_hook_logic(
-        self,
-        context: Dict[str, Any],
-        *,
-        parsed_args: Optional[argparse.Namespace] = None,
-    ) -> HookExecutionResult:
-        result = self._finalise_session(context)
-        self._removed = result.removed_resources
-        self._skipped = result.skipped_resources
-
-        hook_result = HookExecutionResult()
-        hook_result.payload["hookSpecificOutput"] = {
-            "hookEventName": SESSION_END,
-            "additionalContext": result.context,
-        }
-        if result.skipped_resources:
-            hook_result.notes.append("session_end_skipped_cleanup")
-        return hook_result
-
-    def _finalise_session(self, context: Dict[str, Any]) -> SessionEndResult:
-        session_id = context.get("session_id") or context.get("sessionId") or "unknown-session"
-        if not isinstance(session_id, str):
-            session_id = str(session_id)
-
-        end_time = context.get("end_time") if isinstance(context.get("end_time"), str) else utc_timestamp()
-        duration = _parse_duration(context.get("duration"))
-        termination_reason = context.get("termination_reason") or context.get("reason") or "normal"
-        statistics = context.get("statistics") if isinstance(context.get("statistics"), dict) else {}
-        resources = context.get("resources_to_cleanup") or context.get("cleanup" ) or []
-        if not isinstance(resources, list):
-            resources = []
-
-        removed, skipped = _cleanup_resources(session_id, resources)
-
-        state = load_state()
-        session_entry = state.get(session_id, {}) if isinstance(state, dict) else {}
-        session_entry.setdefault("state", {})
-        session_entry["state"].update({"status": "ended", "endedAt": end_time, "termination": termination_reason})
-        if duration is not None:
-            session_entry["state"]["durationSeconds"] = duration
-        session_entry.setdefault("history", []).append(
-            {
-                "event": "session_end",
-                "timestamp": end_time,
-                "termination": termination_reason,
-                "removed": removed,
-                "skipped": skipped,
-            }
-        )
-        session_entry["statistics"] = statistics
-        state[session_id] = session_entry
-        write_state(state)
-        append_event_log(
-            {
-                "sessionId": session_id,
-                "event": "session_end",
-                "timestamp": end_time,
-                "termination": termination_reason,
-                "removed": removed,
-                "skipped": skipped,
-            }
-        )
-
-        summary = {
-            "sessionId": session_id,
-            "endedAt": end_time,
+    state = load_state()
+    session_entry = state.get(session_id, {}) if isinstance(state, dict) else {}
+    session_entry.setdefault("state", {})
+    session_entry["state"].update({"status": "ended", "endedAt": end_time, "termination": termination_reason})
+    if duration is not None:
+        session_entry["state"]["durationSeconds"] = duration
+    session_entry.setdefault("history", []).append(
+        {
+            "event": "session_end",
+            "timestamp": end_time,
             "termination": termination_reason,
-            "durationSeconds": duration,
-            "statistics": statistics,
-            "removedResources": list(removed),
-            "skippedResources": list(skipped),
+            "removed": removed,
+            "skipped": skipped,
         }
+    )
+    session_entry["statistics"] = statistics
+    state[session_id] = session_entry
+    write_state(state)
+    append_event_log(
+        {
+            "sessionId": session_id,
+            "event": "session_end",
+            "timestamp": end_time,
+            "termination": termination_reason,
+            "removed": removed,
+            "skipped": skipped,
+        }
+    )
 
-        context_str = json.dumps(summary, ensure_ascii=False)
+    summary = {
+        "sessionId": session_id,
+        "endedAt": end_time,
+        "termination": termination_reason,
+        "durationSeconds": duration,
+        "statistics": statistics,
+        "removedResources": list(removed),
+        "skippedResources": list(skipped),
+    }
 
-        return SessionEndResult(context=context_str, removed_resources=removed, skipped_resources=skipped)
+    context_str = json.dumps(summary, ensure_ascii=False)
 
-    @property
-    def removed(self) -> Tuple[str, ...]:
-        return self._removed
+    return SessionEndResult(context=context_str, removed_resources=removed, skipped_resources=skipped)
 
-    @property
-    def skipped(self) -> Tuple[str, ...]:
-        return self._skipped
+    # Properties removed with class
 
 
 def _parse_duration(value: Any) -> Optional[float]:
@@ -247,31 +200,24 @@ def _session_root_path(session_id: str) -> Path:
     return base / session_id
 
 
-def main() -> int:
-    """CLI entry point for SessionEnd hook."""
+def _utc_timestamp() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    parser = argparse.ArgumentParser(description="Claude Code SessionEnd hook")
-    parser.add_argument("--enable-audio", action="store_true", help="Enable actual audio playback")
-    parser.add_argument("--json-only", action="store_true", help="Reserved for compatibility; no-op")
-    args = parser.parse_args()
 
-    payload, _ = parse_stdin()
-    hook = SessionEndHook()
-
-    result = hook.execute(payload, enable_audio=bool(args.enable_audio), parsed_args=args)
-
+def main() -> int:  # pragma: no cover - simple CLI passthrough
+    parser = argparse.ArgumentParser(description="Claude Code SessionEnd (function)")
+    parser.add_argument("--enable-audio", action="store_true")
+    _ = parser.parse_args()
     try:
-        log_parts = [
-            "[SessionEnd]",
-            f"session={payload.get('session_id') or payload.get('sessionId') or 'unknown'}",
-            f"removed={len(hook.removed)}",
-            f"skipped={len(hook.skipped)}",
-        ]
-        print(" ".join(log_parts), file=sys.stderr)
-    except OSError:
-        pass
-
-    hook.emit_json(result)
+        raw = sys.stdin.read().strip() or "{}"
+        payload = json.loads(raw)
+    except Exception:
+        payload = {}
+    from herald import build_default_dispatcher
+    disp = build_default_dispatcher()
+    report = disp.dispatch(SESSION_END, payload=payload)
+    print(json.dumps(report.response))
     return 0
 
 

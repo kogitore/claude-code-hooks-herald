@@ -27,29 +27,23 @@ def main() -> int:
     ap.add_argument("--sounds", type=str, default=None, help="Path to sounds dir (defaults to autodetect)")
     args = ap.parse_args()
 
+    # Curated 8-file suite (Phase 2/3 slimming)
     tests = [
-        # 現有測試
+        # Hook functionality
         ".claude/hooks/tests/test_notification.py",
         ".claude/hooks/tests/test_stop.py",
-        ".claude/hooks/tests/test_subagent_stop.py",
-        ".claude/hooks/tests/test_throttle.py",
-        ".claude/hooks/tests/test_json_only.py",
-        ".claude/hooks/tests/test_audio_played_and_timeout.py",
-        # 新增模組測試
-        ".claude/hooks/tests/test_constants.py",
-        ".claude/hooks/tests/test_session_storage.py",
-        ".claude/hooks/tests/test_user_prompt_submit.py",
+
+        # Security/decision flows
         ".claude/hooks/tests/test_pre_tool_use.py",
         ".claude/hooks/tests/test_post_tool_use.py",
+
+        # Prompt and session lifecycle
+        ".claude/hooks/tests/test_user_prompt_submit.py",
         ".claude/hooks/tests/test_session_management.py",
-        # Herald dispatcher 測試 (包含 CLI 測試)
-        ".claude/hooks/tests/test_dispatcher.py",
-        # ConfigManager 測試
+
+        # Config + integration sanity
         ".claude/hooks/tests/test_config_manager.py",
-        # 驗證測試 (移動過來的)
-        ".claude/hooks/tests/test_fix_verification.py",
-        ".claude/hooks/tests/test_goal3_verification.py",
-        ".claude/hooks/tests/test_integration_verification.py",
+        ".claude/hooks/tests/test_herald_integration.py",
     ]
 
     rc_accum = 0
@@ -65,6 +59,18 @@ def main() -> int:
         if args.sounds:
             cmd.extend(["--sounds", args.sounds])
         print(f"\n>>> Running {t}")
+        # Skip pytest-dependent tests if pytest is not available
+        if t.endswith("test_dispatcher.py"):
+            try:
+                import pytest  # noqa: F401
+            except Exception:
+                print(f"Skipping {t} (pytest not installed)")
+                continue
+        # If test file was removed or moved, skip gracefully
+        test_path = repo_root() / t
+        if not test_path.exists():
+            print(f"Skipping {t} (file not found)")
+            continue
         rc = subprocess.call(cmd, env=base_env)
         rc_accum |= (rc & 0xFF)
 

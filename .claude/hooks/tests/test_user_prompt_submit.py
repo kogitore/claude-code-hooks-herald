@@ -14,7 +14,8 @@ MODULE_ROOT = REPO_ROOT / ".claude" / "hooks"
 if str(MODULE_ROOT) not in sys.path:
     sys.path.insert(0, str(MODULE_ROOT))
 
-import user_prompt_submit as hook_module
+from herald import build_default_dispatcher
+from utils import constants
 
 
 class TestUserPromptSubmitHook(unittest.TestCase):
@@ -36,17 +37,17 @@ class TestUserPromptSubmitHook(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     # Helpers -----------------------------------------------------------
-    def _execute(self, payload: dict, *, time_value: float | None = None):
-        hook = hook_module.UserPromptSubmitHook()
+    def _dispatch(self, payload: dict, *, time_value: float | None = None):
+        disp = build_default_dispatcher()
         if time_value is None:
-            return hook.execute(payload, enable_audio=False)
+            return disp.dispatch(constants.USER_PROMPT_SUBMIT, payload=payload)
         with patch("user_prompt_submit.time.time", return_value=time_value):
-            return hook.execute(payload, enable_audio=False)
+            return disp.dispatch(constants.USER_PROMPT_SUBMIT, payload=payload)
 
     @staticmethod
-    def _decode_context(result: hook_module.HookExecutionResult) -> dict:
-        payload = result.payload["hookSpecificOutput"]["additionalContext"]
-        return json.loads(payload)
+    def _decode_context(report) -> dict:
+        payload = report.response.get("hookSpecificOutput", {}).get("additionalContext", "{}")
+        return json.loads(payload or "{}")
 
     # Tests -------------------------------------------------------------
     def test_normal_prompt_passes_validation(self) -> None:
@@ -56,12 +57,11 @@ class TestUserPromptSubmitHook(unittest.TestCase):
             "session_id": "session-abc",
             "metadata": {"language": "python"},
         }
+        report = self._dispatch(payload)
+        context = self._decode_context(report)
 
-        result = self._execute(payload)
-        context = self._decode_context(result)
-
-        self.assertTrue(result.continue_value)
-        self.assertNotIn("decision", result.payload)
+        self.assertTrue(report.response.get("continue", False))
+        self.assertNotIn("decision", report.response)
         self.assertEqual(context["promptPreview"], "print('hello world')")
         self.assertEqual(context["length"], len(payload["prompt"]))
         self.assertEqual(context.get("issues"), [])
@@ -76,40 +76,40 @@ class TestUserPromptSubmitHook(unittest.TestCase):
     def test_suspicious_prompt_triggers_block(self) -> None:
         payload = {"prompt": "DROP TABLE users;", "user_id": "user-007"}
 
-        result = self._execute(payload)
-        context = self._decode_context(result)
+        report = self._dispatch(payload)
+        context = self._decode_context(report)
 
-        self.assertFalse(result.continue_value)
-        self.assertEqual(result.payload["decision"], "block")
+        self.assertFalse(report.response.get("continue", True))
+        self.assertEqual(report.response.get("decision"), "block")
         self.assertIn("sql_drop", context["issues"])
-        self.assertIn("Issues detected", result.payload["reason"])
+        self.assertIn("Issues detected", report.response.get("reason", ""))
 
     def test_rate_limiting_detects_quick_repeats(self) -> None:
         payload = {"prompt": "run diagnostics", "session_id": "sess-1"}
 
         # First submission establishes the rate tracker entry
-        self._execute(payload, time_value=1000.0)
+        self._dispatch(payload, time_value=1000.0)
         # Second submission happens immediately afterwards -> should be blocked
-        result = self._execute(payload, time_value=1000.2)
-        context = self._decode_context(result)
+        report = self._dispatch(payload, time_value=1000.2)
+        context = self._decode_context(report)
 
-        self.assertFalse(result.continue_value)
-        self.assertEqual(result.payload["decision"], "block")
+        self.assertFalse(report.response.get("continue", True))
+        self.assertEqual(report.response.get("decision"), "block")
         self.assertIn("rate_limited", context["issues"])
-        self.assertIn("rate limited", result.payload["reason"])
+        self.assertIn("rate limited", report.response.get("reason", ""))
 
     def test_prompt_truncation_marks_issue_and_limits_length(self) -> None:
-        original = "a" * (hook_module.MAX_PROMPT_LENGTH + 128)
+        original = "a" * (4000 + 128)
         payload = {"prompt": original, "session_id": "sess-2"}
 
-        result = self._execute(payload)
-        context = self._decode_context(result)
+        report = self._dispatch(payload)
+        context = self._decode_context(report)
 
-        self.assertFalse(result.continue_value)
-        self.assertEqual(result.payload["decision"], "block")
-        self.assertEqual(context["length"], hook_module.MAX_PROMPT_LENGTH)
+        self.assertFalse(report.response.get("continue", True))
+        self.assertEqual(report.response.get("decision"), "block")
+        self.assertEqual(context["length"], 4000)
         self.assertIn("prompt_truncated", context["issues"])
-        self.assertLessEqual(len(context["promptPreview"]), hook_module.MAX_PREVIEW)
+        self.assertLessEqual(len(context["promptPreview"]), 240)
 
 
 if __name__ == "__main__":  # pragma: no cover - script compatibility

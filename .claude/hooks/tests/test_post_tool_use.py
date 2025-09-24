@@ -14,7 +14,8 @@ MODULE_ROOT = REPO_ROOT / ".claude" / "hooks"
 if str(MODULE_ROOT) not in sys.path:
     sys.path.insert(0, str(MODULE_ROOT))
 
-import post_tool_use as hook_module
+from herald import build_default_dispatcher
+from utils import constants
 
 
 class TestPostToolUseHook(unittest.TestCase):
@@ -28,14 +29,14 @@ class TestPostToolUseHook(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _execute(self, payload: dict):
-        hook = hook_module.PostToolUseHook()
-        return hook.execute(payload, enable_audio=False)
+    def _dispatch(self, payload: dict):
+        disp = build_default_dispatcher()
+        return disp.dispatch(constants.POST_TOOL_USE, payload=payload)
 
     @staticmethod
-    def _decode_context(result: hook_module.HookExecutionResult) -> dict:
-        data = result.payload["hookSpecificOutput"]["additionalContext"]
-        return json.loads(data)
+    def _decode_context(report) -> dict:
+        data = report.response.get("hookSpecificOutput", {}).get("additionalContext", "{}")
+        return json.loads(data or "{}")
 
     def test_successful_result_is_logged_and_allows_flow(self) -> None:
         payload = {
@@ -47,12 +48,11 @@ class TestPostToolUseHook(unittest.TestCase):
             },
             "execution_time": 0.42,
         }
+        report = self._dispatch(payload)
+        context = self._decode_context(report)
 
-        result = self._execute(payload)
-        context = self._decode_context(result)
-
-        self.assertTrue(result.continue_value)
-        self.assertNotIn("decision", result.payload)
+        self.assertTrue(report.response.get("continue", False))
+        self.assertNotIn("decision", report.response)
         self.assertEqual(context["tool"], "bash")
         self.assertEqual(context["result"]["success"], True)
         self.assertIn("outputPreview", context["result"])
@@ -74,11 +74,11 @@ class TestPostToolUseHook(unittest.TestCase):
             },
         }
 
-        result = self._execute(payload)
-        context = self._decode_context(result)
+        report = self._dispatch(payload)
+        context = self._decode_context(report)
 
-        self.assertFalse(result.continue_value)
-        self.assertEqual(result.payload["decision"], "block")
+        self.assertFalse(report.response.get("continue", True))
+        self.assertEqual(report.response.get("decision"), "block")
         alerts = context["result"].get("alerts", [])
         self.assertIn("decision_blocked", alerts)
         self.assertIn("error_detected", alerts)
@@ -91,18 +91,19 @@ class TestPostToolUseHook(unittest.TestCase):
         self.assertEqual(logged["shouldAlert"], True)
 
     def test_long_output_is_truncated_in_context(self) -> None:
-        long_output = "x" * (hook_module.MAX_OUTPUT_SNIPPET + 200)
+        # match module-level constant
+        long_output = "x" * (600 + 200)
         payload = {
             "tool": "bash",
             "result": {"success": True, "output": long_output},
         }
 
-        result = self._execute(payload)
-        context = self._decode_context(result)
+        report = self._dispatch(payload)
+        context = self._decode_context(report)
         snippet = context["result"].get("outputPreview", "")
 
-        self.assertTrue(result.continue_value)
-        self.assertEqual(len(snippet), hook_module.MAX_OUTPUT_SNIPPET)
+        self.assertTrue(report.response.get("continue", False))
+        self.assertEqual(len(snippet), 600)
         self.assertTrue(context["result"].get("outputTruncated"))
 
 

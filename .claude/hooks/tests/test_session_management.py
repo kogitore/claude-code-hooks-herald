@@ -15,8 +15,8 @@ MODULE_ROOT = REPO_ROOT / ".claude" / "hooks"
 if str(MODULE_ROOT) not in sys.path:
     sys.path.insert(0, str(MODULE_ROOT))
 
-import session_start as start_module
-import session_end as end_module
+from herald import build_default_dispatcher
+from utils import constants
 import utils.session_storage as session_storage
 
 
@@ -74,7 +74,6 @@ class SessionManagementTestCase(unittest.TestCase):
 
     # Helpers -----------------------------------------------------------
     def _start_session(self, payload: dict = None):
-        hook = start_module.SessionStartHook()
         payload = payload or {
             "session_id": "sess-test",
             "user_id": "user-1",
@@ -82,10 +81,10 @@ class SessionManagementTestCase(unittest.TestCase):
             "environment": {"working_directory": str(self.logs_root)},
             "preferences": {"audio_enabled": True},
         }
-        return hook.execute(payload, enable_audio=False)
+        disp = build_default_dispatcher()
+        return disp.dispatch(constants.SESSION_START, payload=payload)
 
     def _end_session(self, payload: dict = None):
-        hook = end_module.SessionEndHook()
         payload = payload or {
             "session_id": "sess-test",
             "end_time": "2025-09-22T01:00:00Z",
@@ -93,19 +92,20 @@ class SessionManagementTestCase(unittest.TestCase):
             "termination_reason": "normal",
             "resources_to_cleanup": ["tmp"],
         }
-        return hook.execute(payload, enable_audio=False)
+        disp = build_default_dispatcher()
+        return disp.dispatch(constants.SESSION_END, payload=payload)
 
     @staticmethod
-    def _decode_context(result) -> dict:
-        raw = result.payload["hookSpecificOutput"]["additionalContext"]
-        return json.loads(raw)
+    def _decode_context(report) -> dict:
+        raw = report.response.get("hookSpecificOutput", {}).get("additionalContext", "{}")
+        return json.loads(raw or "{}")
 
     # Tests -------------------------------------------------------------
     def test_session_start_writes_state_and_event_log(self) -> None:
-        result = self._start_session()
-        context = self._decode_context(result)
+        report = self._start_session()
+        context = self._decode_context(report)
 
-        self.assertTrue(result.continue_value)
+        self.assertTrue(report.response.get("continue", False))
         self.assertEqual(context["sessionId"], "sess-test")
         self.assertIn("workspace", context)
         self.assertPathExists(self.sessions_root_resolved / "sess-test")
@@ -126,10 +126,10 @@ class SessionManagementTestCase(unittest.TestCase):
         target_dir.mkdir(parents=True, exist_ok=True)
         (target_dir / "artifact.txt").write_text("temp", encoding="utf-8")
 
-        result = self._end_session()
-        context = self._decode_context(result)
+        report = self._end_session()
+        context = self._decode_context(report)
 
-        self.assertTrue(result.continue_value)
+        self.assertTrue(report.response.get("continue", False))
         self.assertIn("sess-test", context["removedResources"][0])
         self.assertFalse(target_dir.exists())
 

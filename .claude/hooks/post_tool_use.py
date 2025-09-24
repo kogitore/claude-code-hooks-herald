@@ -54,8 +54,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from utils.base_hook import BaseHook, HookExecutionResult
-from utils.common_io import parse_stdin
 from utils.constants import POST_TOOL_USE
 from utils.decision_api import DecisionAPI, DecisionResponse
 
@@ -75,137 +73,39 @@ class PostToolUseProcessing:
     error_message: Optional[str]
 
 
-class PostToolUseHook(BaseHook):
-    """PostToolUse hook for tool execution result processing."""
+def _evaluate_context(context: Dict[str, Any], api: DecisionAPI) -> PostToolUseProcessing:
+    tool = _extract_tool_name(context)
+    result_section = context.get("result") if isinstance(context.get("result"), dict) else {}
+    if not isinstance(result_section, dict):
+        result_section = {}
 
-    default_audio_event = POST_TOOL_USE
-    default_throttle_seconds = 45
+    exit_code = _extract_exit_code(result_section)
+    success = _detect_success(result_section, exit_code)
+    duration = _extract_duration(context)
+    error_message = _extract_error_message(result_section)
 
-    def __init__(
-        self,
-        *,
-        decision_api: Optional[DecisionAPI] = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
-        self._decision_api = decision_api or DecisionAPI()
-        self._last_decision: Optional[DecisionResponse] = None
-        self._should_alert: bool = False
+    decision = api.post_tool_use_decision(tool, result_section)
 
-    # -- BaseHook overrides ---------------------------------------------
-    def validate_input(self, data: Dict[str, Any]) -> bool:  # type: ignore[override]
-        return isinstance(data, dict)
+    should_alert = not success or bool(error_message) or decision.blocked
 
-    def process(self, data: Dict[str, Any]) -> Dict[str, Any]:  # type: ignore[override]
-        """Legacy compatibility path (unused)."""
-        return {}
+    sanitized = _sanitize_result_for_output(result_section)
 
-    def handle_error(self, error: Exception) -> Dict[str, Any]:  # type: ignore[override]
-        fallback = self._decision_api.block(
-            "工具結果處理失敗，已阻擋後續流程",
-            event=POST_TOOL_USE,
-            additional_context={"error": type(error).__name__},
-            severity="high",
-            tags=["posttooluse:exception"],
-        )
-        self._last_decision = fallback
-        self._should_alert = True
-        return fallback.to_dict()
+    if decision.blocked:
+        sanitized.setdefault("alerts", []).append("decision_blocked")
+    if error_message:
+        sanitized.setdefault("alerts", []).append("error_detected")
+    if not success and "error_detected" not in sanitized.get("alerts", []):
+        sanitized.setdefault("alerts", []).append("execution_failed")
 
-    def _attach_audio(  # type: ignore[override]
-        self,
-        result: HookExecutionResult,
-        audio_event: str,
-        *,
-        enable_audio: bool,
-        throttle_key: Optional[str],
-        throttle_seconds: Optional[int],
-    ) -> None:
-        if not self._should_alert:
-            return
-        super()._attach_audio(
-            result,
-            audio_event,
-            enable_audio=enable_audio,
-            throttle_key=throttle_key,
-            throttle_seconds=throttle_seconds,
-        )
-
-    # -- Custom behaviour -----------------------------------------------
-    def handle_hook_logic(
-        self,
-        context: Dict[str, Any],
-        *,
-        parsed_args: Optional[argparse.Namespace] = None,
-    ) -> HookExecutionResult:
-        processed = self._evaluate_context(context)
-        self._last_decision = processed.decision
-        self._should_alert = processed.should_alert
-
-        audit_record = {
-            "tool": processed.tool,
-            "timestamp": _utc_timestamp(),
-            "exitCode": processed.exit_code,
-            "duration": processed.duration,
-            "result": processed.sanitized_result,
-            "shouldAlert": processed.should_alert,
-        }
-        if processed.error_message:
-            audit_record["errorMessage"] = processed.error_message
-
-        additional_context = json.dumps(audit_record, ensure_ascii=False)
-
-        result = HookExecutionResult()
-        result.payload["hookSpecificOutput"] = {
-            "hookEventName": POST_TOOL_USE,
-            "additionalContext": additional_context,
-        }
-
-        if processed.decision.blocked:
-            reason = processed.decision.payload.get("reason") or processed.error_message or "PostToolUse blocked by policy"
-            result.payload["decision"] = "block"
-            result.payload["reason"] = reason
-            result.continue_value = False
-
-        _append_audit_record({**audit_record, "decision": "block" if processed.decision.blocked else "allow"})
-
-        if processed.should_alert:
-            result.notes.append("post_tool_use_alert")
-        return result
-
-    def _evaluate_context(self, context: Dict[str, Any]) -> PostToolUseProcessing:
-        tool = _extract_tool_name(context)
-        result_section = context.get("result") if isinstance(context.get("result"), dict) else {}
-        if not isinstance(result_section, dict):
-            result_section = {}
-
-        exit_code = _extract_exit_code(result_section)
-        success = _detect_success(result_section, exit_code)
-        duration = _extract_duration(context)
-        error_message = _extract_error_message(result_section)
-
-        decision = self._decision_api.post_tool_use_decision(tool, result_section)
-
-        should_alert = not success or bool(error_message) or decision.blocked
-
-        sanitized = _sanitize_result_for_output(result_section)
-
-        if decision.blocked:
-            sanitized.setdefault("alerts", []).append("decision_blocked")
-        if error_message:
-            sanitized.setdefault("alerts", []).append("error_detected")
-        if not success and "error_detected" not in sanitized.get("alerts", []):
-            sanitized.setdefault("alerts", []).append("execution_failed")
-
-        return PostToolUseProcessing(
-            decision=decision,
-            sanitized_result=sanitized,
-            should_alert=should_alert,
-            tool=tool,
-            exit_code=exit_code,
-            duration=duration,
-            error_message=error_message,
-        )
+    return PostToolUseProcessing(
+        decision=decision,
+        sanitized_result=sanitized,
+        should_alert=should_alert,
+        tool=tool,
+        exit_code=exit_code,
+        duration=duration,
+        error_message=error_message,
+    )
 
 
 def _sanitize_result_for_output(result_section: Dict[str, Any]) -> Dict[str, Any]:
@@ -345,13 +245,8 @@ def handle_post_tool_use(context) -> "HandlerResult":  # type: ignore[name-defin
     if error_message:
         audit_record["errorMessage"] = error_message
 
-    # Append audit record to decision payload and set hookSpecificOutput for compatibility
-    extra_ctx = {k: v for k, v in audit_record.items() if v is not None}
-    decision.payload["additionalContext"] = extra_ctx
-    decision.payload["hookSpecificOutput"] = {
-        "hookEventName": POST_TOOL_USE,
-        "additionalContext": json.dumps(extra_ctx, ensure_ascii=False),
-    }
+    # Provide a minimal decision payload for dispatcher mapping
+    decision.payload["additionalContext"] = {k: v for k, v in audit_record.items() if v is not None}
 
     # Persist audit line
     _append_audit_record({**audit_record, "decision": "block" if decision.blocked else "allow"})
@@ -366,38 +261,19 @@ def handle_post_tool_use(context) -> "HandlerResult":  # type: ignore[name-defin
     return hr
 
 
-def main() -> int:
-    """CLI entry point for PostToolUse hook."""
-
-    parser = argparse.ArgumentParser(description="Claude Code PostToolUse hook")
-    parser.add_argument("--enable-audio", action="store_true", help="Enable actual audio playback")
-    parser.add_argument("--json-only", action="store_true", help="Reserved for compatibility; no-op")
-    args = parser.parse_args()
-
-    payload, _ = parse_stdin()
-    hook = PostToolUseHook()
-
-    result = hook.execute(payload, enable_audio=bool(args.enable_audio), parsed_args=args)
-
-    decision = hook._last_decision  # internal use for logging
-    if decision:
-        decision_value = decision.payload.get("permissionDecision") or decision.payload.get("decision")
-        log_parts = [
-            "[PostToolUse]",
-            f"tool={payload.get('tool', 'unknown')}",
-            f"decision={decision_value}",
-            f"blocked={decision.blocked}",
-        ]
-        if decision.severity:
-            log_parts.append(f"severity={decision.severity}")
-        if decision.tags:
-            log_parts.append(f"tags={','.join(decision.tags)}")
-        try:
-            print(" ".join(log_parts), file=sys.stderr)
-        except OSError:
-            pass
-
-    hook.emit_json(result)
+def main() -> int:  # pragma: no cover - simple CLI passthrough
+    parser = argparse.ArgumentParser(description="Claude Code PostToolUse (function)")
+    parser.add_argument("--enable-audio", action="store_true")
+    _ = parser.parse_args()
+    try:
+        raw = sys.stdin.read().strip() or "{}"
+        payload = json.loads(raw)
+    except Exception:
+        payload = {}
+    from herald import build_default_dispatcher
+    disp = build_default_dispatcher()
+    report = disp.dispatch(POST_TOOL_USE, payload=payload)
+    print(json.dumps(report.response))
     return 0
 
 

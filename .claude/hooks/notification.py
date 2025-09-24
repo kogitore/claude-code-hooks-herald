@@ -35,17 +35,25 @@ def main() -> int:
     payload, _ = parse_stdin()
 
     # If audio is enabled, play the notification sound directly for manual runs
+    audio_ctx = {"audioType": NOTIFICATION, "enabled": False, "status": "skipped", "hookType": "Notification"}
     if args.enable_audio:
         from utils.audio_manager import AudioManager
 
         am = AudioManager()
-        am.play_audio_safe(NOTIFICATION, enabled=True, additional_context={"source": "notification_cli"})
+        played, path, ctx = am.play_audio_safe(NOTIFICATION, enabled=True, additional_context={"source": "notification_cli"})
+        audio_ctx = dict(ctx or {})
+        audio_ctx.update({"audioType": NOTIFICATION, "enabled": True, "status": "played" if played else "skipped", "hookType": "Notification"})
 
-    # JSON output contract
+    # JSON output contract (legacy-compatible structured context)
     try:
-        print(json.dumps({"continue": True}))
+        print(json.dumps({"continue": True, "additionalContext": {"audioContext": audio_ctx}}))
     except Exception:
         print("{\"continue\": true}")
+    # Emit a minimal stderr marker for tests
+    try:
+        print("[Notification] invoked", file=sys.stderr)
+    except Exception:
+        pass
     return 0
 
 

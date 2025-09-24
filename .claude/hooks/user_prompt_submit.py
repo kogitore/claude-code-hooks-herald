@@ -57,8 +57,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from utils.base_hook import BaseHook, HookExecutionResult
-from utils.common_io import parse_stdin
 from utils.constants import USER_PROMPT_SUBMIT
 
 
@@ -83,93 +81,7 @@ class PromptProcessingResult:
     prompt_preview: Optional[str]
 
 
-class UserPromptSubmitHook(BaseHook):
-    """UserPromptSubmit hook for user input processing and validation."""
-
-    default_audio_event = USER_PROMPT_SUBMIT
-    default_throttle_seconds = 10
-
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._should_alert = False
-        self._issues: Tuple[str, ...] = ()
-        self._preview: Optional[str] = None
-
-    # -- BaseHook overrides ---------------------------------------------
-    def validate_input(self, data: Dict[str, Any]) -> bool:  # type: ignore[override]
-        return isinstance(data, dict)
-
-    def process(self, data: Dict[str, Any]) -> Dict[str, Any]:  # type: ignore[override]
-        """Legacy compatibility path (unused)."""
-        return {}
-
-    def handle_error(self, error: Exception) -> Dict[str, Any]:  # type: ignore[override]
-        self._should_alert = True
-        self._issues = ("prompt_handler_exception",)
-        return {
-            "userPrompt": {
-                "status": "error",
-                "reason": type(error).__name__,
-            }
-        }
-
-    def _attach_audio(  # type: ignore[override]
-        self,
-        result: HookExecutionResult,
-        audio_event: str,
-        *,
-        enable_audio: bool,
-        throttle_key: Optional[str],
-        throttle_seconds: Optional[int],
-    ) -> None:
-        if not self._should_alert:
-            return
-        super()._attach_audio(
-            result,
-            audio_event,
-            enable_audio=enable_audio,
-            throttle_key=throttle_key,
-            throttle_seconds=throttle_seconds,
-        )
-
-    # -- Custom behaviour -----------------------------------------------
-    def handle_hook_logic(
-        self,
-        context: Dict[str, Any],
-        *,
-        parsed_args: Optional[argparse.Namespace] = None,
-    ) -> HookExecutionResult:
-        processed = self._process_prompt(context)
-        self._should_alert = processed.should_alert
-        self._issues = processed.issues
-        self._preview = processed.prompt_preview
-
-        context_payload = {
-            "promptPreview": processed.prompt_preview,
-            "issues": list(processed.issues),
-            "timestamp": _utc_timestamp(),
-        }
-        payload_data = processed.payload.get('userPrompt', {}) if isinstance(processed.payload, dict) else {}
-        context_payload.update({k: v for k, v in payload_data.items() if k not in {"issues", "requiresAttention"}})
-
-        result = HookExecutionResult()
-        result.payload["hookSpecificOutput"] = {
-            "hookEventName": USER_PROMPT_SUBMIT,
-            "additionalContext": json.dumps(context_payload, ensure_ascii=False),
-        }
-
-        if processed.issues:
-            readable = ", ".join(issue.replace("_", " ") for issue in processed.issues)
-            reason = f"Issues detected: {readable}"
-            result.payload["decision"] = "block"
-            result.payload["reason"] = reason
-            result.continue_value = False
-
-        if processed.should_alert:
-            result.notes.append("user_prompt_alert")
-        return result
-
-    def _process_prompt(self, context: Dict[str, Any]) -> PromptProcessingResult:
+def _process_prompt(context: Dict[str, Any]) -> PromptProcessingResult:
         prompt, issues = _extract_prompt(context)
         metadata = context.get("metadata") if isinstance(context.get("metadata"), dict) else {}
         user_id = context.get("user_id") or context.get("userId")
@@ -229,14 +141,6 @@ class UserPromptSubmitHook(BaseHook):
             issues=issues,
             prompt_preview=preview,
         )
-
-    @property
-    def issues(self) -> Tuple[str, ...]:
-        return self._issues
-
-    @property
-    def preview(self) -> Optional[str]:
-        return self._preview
 
 
 def _extract_prompt(context: Dict[str, Any]) -> Tuple[str, Tuple[str, ...]]:
@@ -312,118 +216,46 @@ def handle_user_prompt_submit(context) -> "HandlerResult":  # type: ignore[name-
 
     payload: Dict[str, Any] = context.payload if isinstance(context.payload, dict) else {}
 
-    # Reuse internal helpers to mirror class behaviour
-    prompt, issues = _extract_prompt(payload)
-    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
-    user_id = payload.get("user_id") or payload.get("userId")
-    session_id = payload.get("session_id") or payload.get("sessionId")
-    timestamp = payload.get("timestamp") if isinstance(payload.get("timestamp"), str) else _utc_timestamp()
-
-    rate_issue = _check_rate_limit(user_id, session_id)
-    if rate_issue:
-        issues += (rate_issue,)
-
-    suspicious = _scan_prompt(prompt)
-    issues += suspicious
-
-    truncated = False
-    sanitized_prompt = prompt.strip()
-    if len(sanitized_prompt) > MAX_PROMPT_LENGTH:
-        sanitized_prompt = sanitized_prompt[:MAX_PROMPT_LENGTH]
-        truncated = True
-        issues += ("prompt_truncated",)
-
-    should_alert = bool(issues)
-
-    payload_out = {
-        "userPrompt": {
-            "prompt": sanitized_prompt,
-            "truncated": truncated,
-            "length": len(sanitized_prompt),
-            "timestamp": timestamp,
-        }
-    }
-    if user_id:
-        payload_out["userPrompt"]["userId"] = str(user_id)
-    if session_id:
-        payload_out["userPrompt"]["sessionId"] = str(session_id)
-    if metadata:
-        payload_out["userPrompt"]["metadata"] = metadata
-    if issues:
-        payload_out["userPrompt"]["issues"] = list(dict.fromkeys(issues))
-    if should_alert:
-        payload_out["userPrompt"]["requiresAttention"] = True
-
-    preview = sanitized_prompt[:MAX_PREVIEW] if sanitized_prompt else None
-    _record_submission(
-        {
-            "timestamp": timestamp,
-            "userId": user_id,
-            "sessionId": session_id,
-            "length": len(sanitized_prompt),
-            "issues": list(dict.fromkeys(issues)),
-        }
-    )
-
+    # Process prompt using shared helper
+    processed = _process_prompt(payload)
     context_payload = {
-        "promptPreview": preview,
-        "issues": list(dict.fromkeys(issues)),
+        "promptPreview": processed.prompt_preview,
+        "issues": list(processed.issues),
         "timestamp": _utc_timestamp(),
     }
-    context_payload.update({k: v for k, v in payload_out.get("userPrompt", {}).items() if k not in {"issues", "requiresAttention"}})
+    payload_data = processed.payload.get("userPrompt", {}) if isinstance(processed.payload, dict) else {}
+    context_payload.update({k: v for k, v in payload_data.items() if k not in {"issues", "requiresAttention"}})
 
     hr = HandlerResult()
-    # Map to Claude schema via decision_payload and include hookSpecificOutput for compatibility
-    hr.decision_payload = {
-        "additionalContext": context_payload,
-        "hookSpecificOutput": {
-            "hookEventName": USER_PROMPT_SUBMIT,
-            "additionalContext": json.dumps(context_payload, ensure_ascii=False),
-        },
-    }
-    # Signal block when issues present
-    if issues:
+    hr.decision_payload = {"additionalContext": context_payload}
+    if processed.issues:
+        readable = ", ".join(issue.replace("_", " ") for issue in processed.issues)
         hr.decision_payload["decision"] = "block"
-        hr.decision_payload["reason"] = "Issues detected: " + ", ".join(i.replace("_", " ") for i in issues)
+        hr.decision_payload["reason"] = f"Issues detected: {readable}"
         hr.continue_value = False
     else:
         hr.continue_value = True
 
-    # Audio only on alert
-    if should_alert:
+    if processed.should_alert:
         hr.audio_type = USER_PROMPT_SUBMIT
     else:
         hr.suppress_audio = True
     return hr
 
 
-def main() -> int:
-    """CLI entry point for UserPromptSubmit hook."""
-
-    parser = argparse.ArgumentParser(description="Claude Code UserPromptSubmit hook")
-    parser.add_argument("--enable-audio", action="store_true", help="Enable actual audio playback")
-    parser.add_argument("--json-only", action="store_true", help="Reserved for compatibility; no-op")
-    args = parser.parse_args()
-
-    payload, _ = parse_stdin()
-    hook = UserPromptSubmitHook()
-
-    result = hook.execute(payload, enable_audio=bool(args.enable_audio), parsed_args=args)
-
+def main() -> int:  # pragma: no cover - simple CLI passthrough
+    parser = argparse.ArgumentParser(description="Claude Code UserPromptSubmit (function)")
+    parser.add_argument("--enable-audio", action="store_true")
+    _ = parser.parse_args()
     try:
-        log_parts = [
-            "[UserPromptSubmit]",
-            f"user={payload.get('user_id') or payload.get('userId') or 'anon'}",
-            f"issues={','.join(hook.issues) if hook.issues else 'none'}",
-            f"alert={hook._should_alert}",
-        ]
-        if hook.preview:
-            log_parts.append(f"preview={hook.preview[:48]}")
-        print(" ".join(log_parts), file=sys.stderr)
-    except OSError:
-        pass
-
-    hook.emit_json(result)
+        raw = sys.stdin.read().strip() or "{}"
+        payload = json.loads(raw)
+    except Exception:
+        payload = {}
+    from herald import build_default_dispatcher
+    disp = build_default_dispatcher()
+    report = disp.dispatch(USER_PROMPT_SUBMIT, payload=payload)
+    print(json.dumps(report.response))
     return 0
 
 

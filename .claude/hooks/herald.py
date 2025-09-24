@@ -27,12 +27,12 @@ from utils.audio_manager import AudioManager
 from utils.common_io import generate_audio_notes, parse_stdin
 from utils.decision_api import DecisionAPI
 from notification import handle_notification
-from post_tool_use import PostToolUseHook, handle_post_tool_use
-from pre_tool_use import PreToolUseHook, handle_pre_tool_use
-from session_end import handle_session_end, SessionEndHook
-from session_start import handle_session_start, SessionStartHook
-from stop import handle_stop
-from user_prompt_submit import UserPromptSubmitHook, handle_user_prompt_submit
+from post_tool_use import handle_post_tool_use
+from pre_tool_use import handle_pre_tool_use
+from session_end import handle_session_end
+from session_start import handle_session_start
+from stop import handle_stop, handle_subagent_stop
+from user_prompt_submit import handle_user_prompt_submit
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +113,8 @@ class DispatchReport:
 
 DEFAULT_THROTTLE_WINDOWS: MutableMapping[str, int] = {
     constants.NOTIFICATION: 30,
-    constants.STOP: 600,
-    constants.SUBAGENT_STOP: 600,
+    constants.STOP: 120,  # Match audio_config.json setting
+    constants.SUBAGENT_STOP: 120,  # Match audio_config.json setting
     constants.PRE_TOOL_USE: 60,
     constants.POST_TOOL_USE: 45,
     constants.SESSION_START: 5,
@@ -254,25 +254,50 @@ class HeraldDispatcher:
         if handler_response.decision_payload:
             decision_data = handler_response.decision_payload
 
+            # 1) PreToolUse: emit permissionDecision (+ optional reason)
             if event_type == constants.PRE_TOOL_USE:
-                # PreToolUse specific schema
                 response["hookSpecificOutput"] = {
                     "hookEventName": constants.PRE_TOOL_USE,
-                    "permissionDecision": decision_data.get("permissionDecision", "allow")
+                    "permissionDecision": decision_data.get("permissionDecision", "allow"),
                 }
                 if "permissionDecisionReason" in decision_data:
                     response["hookSpecificOutput"]["permissionDecisionReason"] = decision_data["permissionDecisionReason"]
 
+            # 2) UserPromptSubmit: emit additionalContext (JSON string)
             elif event_type == constants.USER_PROMPT_SUBMIT:
-                # UserPromptSubmit specific schema
+                addl = decision_data.get("additionalContext", "")
+                if isinstance(addl, (dict, list)):
+                    try:
+                        addl = json.dumps(addl, ensure_ascii=False)
+                    except Exception:
+                        addl = ""
                 response["hookSpecificOutput"] = {
                     "hookEventName": constants.USER_PROMPT_SUBMIT,
-                    "additionalContext": decision_data.get("additionalContext", "")
+                    "additionalContext": addl,
                 }
-            else:
-                # For other events that have decision logic (PostToolUse, etc.)
-                # Stop and SubagentStop should remain simple and not include decision fields
-                pass
+                # Copy block decision to top-level if present
+                if decision_data.get("decision"):
+                    response["decision"] = decision_data.get("decision")
+                if decision_data.get("reason"):
+                    response["reason"] = decision_data.get("reason")
+
+            # 3) PostToolUse: emit additionalContext (JSON string) and decision if blocked
+            elif event_type == constants.POST_TOOL_USE:
+                addl = decision_data.get("additionalContext", "")
+                if isinstance(addl, (dict, list)):
+                    try:
+                        addl = json.dumps(addl, ensure_ascii=False)
+                    except Exception:
+                        addl = ""
+                response["hookSpecificOutput"] = {
+                    "hookEventName": constants.POST_TOOL_USE,
+                    "additionalContext": addl,
+                }
+                # If decision layer flagged a block, surface it
+                if decision_data.get("decision"):
+                    response["decision"] = decision_data.get("decision")
+                if decision_data.get("reason"):
+                    response["reason"] = decision_data.get("reason")
 
         # Ensure only schema-compliant top-level fields are present
         schema_fields = {"continue", "suppressOutput", "stopReason", "systemMessage", "decision", "reason", "hookSpecificOutput"}
@@ -356,30 +381,6 @@ def build_default_dispatcher(
                 maybe = hook_instance(context)
                 if isinstance(maybe, HandlerResult):
                     return maybe
-            # Fallback for class-based hooks still using BaseHook
-            if hasattr(hook_instance, "execute"):
-                result = hook_instance.execute(
-                    context.payload,
-                    enable_audio=context.enable_audio,
-                    parsed_args=context.metadata.get("argv"),
-                )
-                hr = HandlerResult()
-                hr.continue_value = getattr(result, "continue_value", True)
-                if getattr(result, "payload", None):
-                    hr.response.update(result.payload)
-                hr.audio_type = getattr(result, "audio_type", None) or event_name
-                hr.throttle_key = getattr(result, "throttle_key", None)
-                hr.throttle_window = getattr(result, "throttle_window", None)
-                if getattr(result, "notes", None):
-                    hr.notes.extend(result.notes)
-                if getattr(result, "errors", None):
-                    context.errors.extend(result.errors)
-                # Try to capture decision payload if present
-                last_decision = getattr(hook_instance, "_last_decision", None)
-                if last_decision is not None and hasattr(last_decision, "to_dict"):
-                    hr.decision_payload = last_decision.to_dict()
-                    hr.blocked = getattr(last_decision, "blocked", False)
-                return hr
             return HandlerResult()
 
         return handler
@@ -399,7 +400,7 @@ def build_default_dispatcher(
 
     dispatcher.register_handler(constants.NOTIFICATION, _hook_handler(constants.NOTIFICATION, handle_notification), audio_type=constants.NOTIFICATION)
     dispatcher.register_handler(constants.STOP, _hook_handler(constants.STOP, handle_stop), audio_type=constants.STOP)
-    dispatcher.register_handler(constants.SUBAGENT_STOP, _hook_handler(constants.SUBAGENT_STOP, handle_stop), audio_type=constants.SUBAGENT_STOP)
+    dispatcher.register_handler(constants.SUBAGENT_STOP, _hook_handler(constants.SUBAGENT_STOP, handle_subagent_stop), audio_type=constants.SUBAGENT_STOP)
     dispatcher.register_handler(constants.PRE_TOOL_USE, _hook_handler(constants.PRE_TOOL_USE, pre_tool_use_hook), audio_type=constants.PRE_TOOL_USE)
     dispatcher.register_handler(constants.POST_TOOL_USE, _hook_handler(constants.POST_TOOL_USE, post_tool_use_hook), audio_type=constants.POST_TOOL_USE)
     dispatcher.register_handler(constants.SESSION_START, _hook_handler(constants.SESSION_START, handle_session_start), audio_type=constants.SESSION_START)

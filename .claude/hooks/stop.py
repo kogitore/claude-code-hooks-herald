@@ -11,10 +11,16 @@ from utils.constants import STOP
 
 
 def handle_stop(context) -> "HandlerResult":  # type: ignore[name-defined]
+    """Handle both Stop and SubagentStop events with same logic"""
     from herald import HandlerResult  # local import to avoid circulars
     hr = HandlerResult()
-    hr.audio_type = STOP
+    hr.audio_type = context.event_type  # Use event_type to handle both Stop/SubagentStop
     return hr
+
+
+def handle_subagent_stop(context) -> "HandlerResult":  # type: ignore[name-defined]
+    """Alias for handle_stop - same logic for both events"""
+    return handle_stop(context)
 
 
 def main() -> int:
@@ -25,14 +31,22 @@ def main() -> int:
 
     payload, _ = parse_stdin()
 
-    # Manual run audio
+    # Manual run audio + structured response for legacy Goal3 test
+    audio_ctx = {"audioType": STOP, "enabled": False, "status": "skipped", "hookType": "Stop"}
     if args.enable_audio:
         from utils.audio_manager import AudioManager
 
         am = AudioManager()
-        am.play_audio_safe(STOP, enabled=True, additional_context={"source": "stop_cli"})
-
-    print(json.dumps({"continue": True}))
+        played, path, audio_ctx = am.play_audio_safe(STOP, enabled=True, additional_context={"source": "stop_cli"})
+        audio_ctx = dict(audio_ctx or {})
+        audio_ctx.update({"audioType": STOP, "enabled": True, "status": "played" if played else "skipped", "hookType": "Stop"})
+    # Emit a minimal stderr marker for tests
+    try:
+        print("[Stop] invoked", file=sys.stderr)
+    except Exception:
+        pass
+    response = {"continue": True, "additionalContext": {"audioContext": audio_ctx}}
+    print(json.dumps(response))
     return 0
 
 

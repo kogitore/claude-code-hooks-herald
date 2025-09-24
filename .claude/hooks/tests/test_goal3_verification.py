@@ -108,8 +108,10 @@ def test_hook_compatibility():
     
     for hook in hooks_to_test:
         try:
+            # Resolve absolute path to hook script in parent directory of tests
+            hook_path = (Path(__file__).parent.parent / hook).resolve()
             result = subprocess.run(
-                ['python3', hook, '--enable-audio'],
+                ['python3', str(hook_path), '--enable-audio'],
                 input='{}',
                 text=True,
                 capture_output=True,

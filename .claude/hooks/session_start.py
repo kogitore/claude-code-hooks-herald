@@ -61,10 +61,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from utils.audio_manager import AudioManager
-from utils.base_hook import BaseHook, HookExecutionResult
-from utils.common_io import parse_stdin
 from utils.constants import SESSION_START
-from utils.session_storage import append_event_log, load_state, utc_timestamp, write_state
+from utils.session_storage import load_state, write_state, append_event_log
 
 
 # --- Function-based simple handler for dispatcher ---------------------------
@@ -72,7 +70,16 @@ def handle_session_start(context) -> "HandlerResult":  # type: ignore[name-defin
     from herald import HandlerResult  # local import to avoid circulars
     hr = HandlerResult()
     hr.audio_type = SESSION_START
-    # No extra response fields required; dispatcher will output {"continue": true}
+    # Perform initialisation side-effects and include summary context
+    try:
+        result = _initialise_session(context.payload if isinstance(context.payload, dict) else {})
+        hr.response["hookSpecificOutput"] = {
+            "hookEventName": SESSION_START,
+            "additionalContext": result.context,
+        }
+    except Exception:
+        # Best-effort: if init fails, still continue to avoid breaking sessions
+        pass
     return hr
 
 
@@ -83,122 +90,73 @@ class SessionStartResult:
     warnings: Tuple[str, ...]
 
 
-class SessionStartHook(BaseHook):
-    """SessionStart hook for session initialization and setup."""
+    # Class-based hook removed in Phase 3
 
-    default_audio_event = SESSION_START
-    default_throttle_seconds = 5
 
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._checks: Tuple[str, ...] = ()
-        self._warnings: Tuple[str, ...] = ()
+def _initialise_session(context: Dict[str, Any]) -> SessionStartResult:
+    session_id = context.get("session_id") or context.get("sessionId") or "unknown-session"
+    if not isinstance(session_id, str):
+        session_id = str(session_id)
 
-    # -- BaseHook overrides ---------------------------------------------
-    def validate_input(self, data: Dict[str, Any]) -> bool:  # type: ignore[override]
-        return isinstance(data, dict)
+    user_id = context.get("user_id") or context.get("userId")
+    start_time = context.get("start_time") if isinstance(context.get("start_time"), str) else _utc_timestamp()
+    environment = context.get("environment") if isinstance(context.get("environment"), dict) else {}
+    preferences = context.get("preferences") if isinstance(context.get("preferences"), dict) else {}
 
-    def process(self, data: Dict[str, Any]) -> Dict[str, Any]:  # type: ignore[override]
-        """Legacy compatibility path (unused)."""
-        return {}
+    session_root = _session_root_path(session_id)
+    _ensure_directory(session_root)
 
-    def handle_error(self, error: Exception) -> Dict[str, Any]:  # type: ignore[override]
-        self._checks = ()
-        self._warnings = ("session_start_exception",)
-        return {
-            "session": {
-                "status": "error",
-                "reason": type(error).__name__,
-            }
-        }
+    checks, warnings = _run_health_checks(environment, preferences)
 
-    # -- Custom behaviour -----------------------------------------------
-    def handle_hook_logic(
-        self,
-        context: Dict[str, Any],
-        *,
-        parsed_args: Optional[argparse.Namespace] = None,
-    ) -> HookExecutionResult:
-        result = self._initialise_session(context)
-        self._checks = result.checks
-        self._warnings = result.warnings
-
-        hook_result = HookExecutionResult()
-        hook_result.payload["hookSpecificOutput"] = {
-            "hookEventName": SESSION_START,
-            "additionalContext": result.context,
-        }
-        if result.warnings:
-            hook_result.notes.append("session_start_warnings")
-        return hook_result
-
-    def _initialise_session(self, context: Dict[str, Any]) -> SessionStartResult:
-        session_id = context.get("session_id") or context.get("sessionId") or "unknown-session"
-        if not isinstance(session_id, str):
-            session_id = str(session_id)
-
-        user_id = context.get("user_id") or context.get("userId")
-        start_time = context.get("start_time") if isinstance(context.get("start_time"), str) else utc_timestamp()
-        environment = context.get("environment") if isinstance(context.get("environment"), dict) else {}
-        preferences = context.get("preferences") if isinstance(context.get("preferences"), dict) else {}
-
-        session_root = _session_root_path(session_id)
-        _ensure_directory(session_root)
-
-        checks, warnings = _run_health_checks(environment, preferences)
-
-        state = load_state()
-        state[session_id] = {
-            "sessionId": session_id,
-            "userId": user_id,
-            "startedAt": start_time,
-            "environment": environment,
-            "preferences": preferences,
-            "state": {"status": "active"},
-            "history": [
-                {
-                    "event": "session_start",
-                    "timestamp": start_time,
-                    "checks": checks,
-                    "warnings": warnings,
-                }
-            ],
-        }
-        write_state(state)
-        append_event_log(
+    state = load_state()
+    state[session_id] = {
+        "sessionId": session_id,
+        "userId": user_id,
+        "startedAt": start_time,
+        "environment": environment,
+        "preferences": preferences,
+        "state": {"status": "active"},
+        "history": [
             {
-                "sessionId": session_id,
                 "event": "session_start",
                 "timestamp": start_time,
                 "checks": checks,
                 "warnings": warnings,
             }
-        )
-
-        session_summary = {
+        ],
+    }
+    write_state(state)
+    append_event_log(
+        {
             "sessionId": session_id,
-            "userId": user_id,
-            "startedAt": start_time,
-            "setupChecks": list(checks),
-            "warnings": list(warnings),
-            "workspace": str(session_root),
+            "event": "session_start",
+            "timestamp": start_time,
+            "checks": checks,
+            "warnings": warnings,
         }
-        if preferences:
-            session_summary["preferences"] = preferences
-        if environment:
-            session_summary["environment"] = environment
+    )
 
-        context_str = json.dumps(session_summary, ensure_ascii=False)
+    session_summary = {
+        "sessionId": session_id,
+        "userId": user_id,
+        "startedAt": start_time,
+        "setupChecks": list(checks),
+        "warnings": list(warnings),
+        "workspace": str(session_root),
+    }
+    if preferences:
+        session_summary["preferences"] = preferences
+    if environment:
+        session_summary["environment"] = environment
 
-        return SessionStartResult(context=context_str, checks=checks, warnings=warnings)
+    context_str = json.dumps(session_summary, ensure_ascii=False)
 
-    @property
-    def checks(self) -> Tuple[str, ...]:
-        return self._checks
+    return SessionStartResult(context=context_str, checks=checks, warnings=warnings)
 
-    @property
-    def warnings(self) -> Tuple[str, ...]:
-        return self._warnings
+
+def _utc_timestamp() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _session_root_path(session_id: str) -> Path:
@@ -245,32 +203,19 @@ def _run_health_checks(environment: Dict[str, Any], preferences: Dict[str, Any])
     return tuple(checks), tuple(warnings)
 
 
-def main() -> int:
-    """CLI entry point for SessionStart hook."""
-
-    parser = argparse.ArgumentParser(description="Claude Code SessionStart hook")
-    parser.add_argument("--enable-audio", action="store_true", help="Enable actual audio playback")
-    parser.add_argument("--json-only", action="store_true", help="Reserved for compatibility; no-op")
-    args = parser.parse_args()
-
-    payload, _ = parse_stdin()
-    hook = SessionStartHook()
-
-    result = hook.execute(payload, enable_audio=bool(args.enable_audio), parsed_args=args)
-
+def main() -> int:  # pragma: no cover - simple CLI passthrough
+    parser = argparse.ArgumentParser(description="Claude Code SessionStart (function)")
+    parser.add_argument("--enable-audio", action="store_true")
+    _ = parser.parse_args()
     try:
-        log_parts = [
-            "[SessionStart]",
-            f"session={payload.get('session_id') or payload.get('sessionId') or 'unknown'}",
-            f"checks={','.join(hook.checks) if hook.checks else 'none'}",
-        ]
-        if hook.warnings:
-            log_parts.append(f"warnings={','.join(hook.warnings)}")
-        print(" ".join(log_parts), file=sys.stderr)
-    except OSError:
-        pass
-
-    hook.emit_json(result)
+        raw = sys.stdin.read().strip() or "{}"
+        payload = json.loads(raw)
+    except Exception:
+        payload = {}
+    from herald import build_default_dispatcher
+    disp = build_default_dispatcher()
+    report = disp.dispatch(SESSION_START, payload=payload)
+    print(json.dumps(report.response))
     return 0
 
 
