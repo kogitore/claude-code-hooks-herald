@@ -16,6 +16,9 @@ from dataclasses import dataclass
 import time
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple, Any
+import threading
+from threading import RLock, Lock
+from contextlib import contextmanager
 
 from . import constants
 from .config_manager import ConfigManager
@@ -129,85 +132,92 @@ class AudioConfig:
 
 class AudioManager:
     def __init__(self):
-        here_path = Path(__file__).resolve()
-        # Project root is three levels up: utils -> hooks -> .claude -> <root>
-        repo_root = here_path.parents[3]
+        # 線程安全鎖 - 添加在初始化最開始
+        self._config_lock = RLock()      # 配置訪問鎖 (可重入)
+        self._throttle_lock = Lock()     # 節流檔案操作鎖
+        self._playback_lock = RLock()    # 音效播放協調鎖 (可重入)
 
-        # Initialize ConfigManager with the utils directory
-        config_dir = here_path.parent
-        self._config_manager = ConfigManager.get_instance([str(config_dir)])
+        # 原有初始化程式碼用 config_lock 保護
+        with self._config_lock:
+            here_path = Path(__file__).resolve()
+            # Project root is three levels up: utils -> hooks -> .claude -> <root>
+            repo_root = here_path.parents[3]
 
-        # 1) ENV override (highest priority)
-        env_dir = os.getenv("CLAUDE_SOUNDS_DIR") or os.getenv("AUDIO_SOUNDS_DIR")
-        sounds_dir = Path(env_dir).expanduser() if env_dir else None
-        if sounds_dir and not sounds_dir.is_absolute():
-            sounds_dir = repo_root / sounds_dir
+            # Initialize ConfigManager with the utils directory
+            config_dir = here_path.parent
+            self._config_manager = ConfigManager.get_instance([str(config_dir)])
 
-        # Load config early using ConfigManager
-        cfg = _load_config(self._config_manager)
+            # 1) ENV override (highest priority)
+            env_dir = os.getenv("CLAUDE_SOUNDS_DIR") or os.getenv("AUDIO_SOUNDS_DIR")
+            sounds_dir = Path(env_dir).expanduser() if env_dir else None
+            if sounds_dir and not sounds_dir.is_absolute():
+                sounds_dir = repo_root / sounds_dir
 
-        # 2) Config base_path if ENV not set
-        if not sounds_dir:
+            # Load config early using ConfigManager
+            cfg = _load_config(self._config_manager)
+
+            # 2) Config base_path if ENV not set
+            if not sounds_dir:
+                try:
+                    base = cfg.get("sound_files", {}).get("base_path")
+                    if isinstance(base, str):
+                        base_path = Path(base)
+                        sounds_dir = base_path if base_path.is_absolute() else (repo_root / base_path)
+                except Exception:
+                    sounds_dir = None
+
+            # 3) Default path relative to repo root
+            if not sounds_dir:
+                sounds_dir = repo_root / ".claude" / "sounds"
+
+            # Defaults map to official event names
+            mappings = {
+                constants.STOP: "task_complete.wav",
+                constants.SUBAGENT_STOP: "agent_complete.wav",
+                constants.NOTIFICATION: "user_prompt.wav",
+                constants.PRE_TOOL_USE: "security_check.wav",
+                constants.POST_TOOL_USE: "task_complete.wav",
+                constants.SESSION_START: "session_start.wav",
+                constants.SESSION_END: "session_complete.wav",
+                constants.USER_PROMPT_SUBMIT: "user_prompt.wav",
+            }
+
+            # Optional config override (config wins over defaults)
+            volume = 0.2
+            throttle_cfg: Dict[str, int] = {}
+
             try:
-                base = cfg.get("sound_files", {}).get("base_path")
-                if isinstance(base, str):
-                    base_path = Path(base)
-                    sounds_dir = base_path if base_path.is_absolute() else (repo_root / base_path)
+                m = cfg.get("sound_files", {}).get("mappings", {})
+                if isinstance(m, dict):
+                    for raw_key, value in m.items():
+                        canonical = _canonical_audio_key(raw_key)
+                        mappings[canonical] = str(value)
+                vol = cfg.get("audio_settings", {}).get("volume")
+                if isinstance(vol, (int, float)):
+                    volume = max(0.0, min(1.0, float(vol)))
+                throttle_settings = cfg.get("audio_settings", {}).get("throttle_seconds", {})
+                if isinstance(throttle_settings, dict):
+                    for raw_key, value in throttle_settings.items():
+                        if isinstance(value, (int, float)):
+                            canonical = _canonical_audio_key(str(raw_key))
+                            throttle_cfg[canonical] = max(0, int(value))
             except Exception:
-                sounds_dir = None
+                pass
 
-        # 3) Default path relative to repo root
-        if not sounds_dir:
-            sounds_dir = repo_root / ".claude" / "sounds"
+            self.config = AudioConfig(base_path=sounds_dir, mappings=mappings)
+            self.volume = volume
+            self._throttle_cfg = throttle_cfg
 
-        # Defaults map to official event names
-        mappings = {
-            constants.STOP: "task_complete.wav",
-            constants.SUBAGENT_STOP: "agent_complete.wav",
-            constants.NOTIFICATION: "user_prompt.wav",
-            constants.PRE_TOOL_USE: "security_check.wav",
-            constants.POST_TOOL_USE: "task_complete.wav",
-            constants.SESSION_START: "session_start.wav",
-            constants.SESSION_END: "session_complete.wav",
-            constants.USER_PROMPT_SUBMIT: "user_prompt.wav",
-        }
+            # Throttle store under repo_root/logs
+            self._throttle_path = repo_root / "logs" / "audio_throttle.json"
+            try:
+                self._throttle_path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
 
-        # Optional config override (config wins over defaults)
-        volume = 0.2
-        throttle_cfg: Dict[str, int] = {}
-
-        try:
-            m = cfg.get("sound_files", {}).get("mappings", {})
-            if isinstance(m, dict):
-                for raw_key, value in m.items():
-                    canonical = _canonical_audio_key(raw_key)
-                    mappings[canonical] = str(value)
-            vol = cfg.get("audio_settings", {}).get("volume")
-            if isinstance(vol, (int, float)):
-                volume = max(0.0, min(1.0, float(vol)))
-            throttle_settings = cfg.get("audio_settings", {}).get("throttle_seconds", {})
-            if isinstance(throttle_settings, dict):
-                for raw_key, value in throttle_settings.items():
-                    if isinstance(value, (int, float)):
-                        canonical = _canonical_audio_key(str(raw_key))
-                        throttle_cfg[canonical] = max(0, int(value))
-        except Exception:
-            pass
-
-        self.config = AudioConfig(base_path=sounds_dir, mappings=mappings)
-        self.volume = volume
-        self._throttle_cfg = throttle_cfg
-
-        # Throttle store under repo_root/logs
-        self._throttle_path = repo_root / "logs" / "audio_throttle.json"
-        try:
-            self._throttle_path.parent.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-
-        # Player selection & timeout
-        self._timeout_s = float(os.getenv("AUDIO_PLAYER_TIMEOUT", "5"))
-        self._player_cmd, self._player_base_args = self._select_player()
+            # Player selection & timeout
+            self._timeout_s = float(os.getenv("AUDIO_PLAYER_TIMEOUT", "5"))
+            self._player_cmd, self._player_base_args = self._select_player()
 
     def _select_player(self) -> Tuple[Optional[str], List[str]]:
         # ENV override first
@@ -251,48 +261,61 @@ class AudioManager:
             return cfg_value
         return max(0, int(default_seconds))
 
-    def play_audio(self, audio_type: str, enabled: bool = False, additional_context: Optional[Dict[str, Any]] = None) -> tuple[bool, Optional[Path], Dict[str, Any]]:
-        """Attempt to play local audio. Returns (played, path, context).
+    def play_audio_safe(self, audio_type: str, enabled: bool = False,
+                       additional_context: Optional[Dict[str, Any]] = None) -> tuple[bool, Optional[Path], Dict[str, Any]]:
+        """線程安全的音效播放，支援並發請求處理."""
 
-        Goal 3: Enhanced for structured communication via additionalContext
-        
-        - If not enabled or file missing, returns (False, maybe_path, context)
-        - Does not raise on failure
-        - additional_context: Optional structured data for hook communication
-        """
-        audio_type = self._normalize_key(audio_type)
-        path = self.resolve_file(audio_type)
-        
-        # Goal 3: Build structured context for hook communication
-        context = {
-            "audioType": audio_type,
-            "enabled": enabled,
-            "playerCmd": self._player_cmd,
-            "volume": self.volume,
-            "filePath": str(path) if path else None,
-            **(additional_context or {})
-        }
-        
-        if not enabled or path is None:
-            context["status"] = "skipped"
-            context["reason"] = "disabled" if not enabled else "file_not_found"
-            return False, path, context
+        # 使用播放鎖保護整個播放流程
+        with self._playback_lock:
+            # 線程安全的配置訪問
+            with self._config_lock:
+                audio_type = self._normalize_key(audio_type)
+                path = self.resolve_file(audio_type)
 
-        # Use cached player
-        if self._player_cmd:
+            # 建立播放上下文 (線程安全)
+            context = {
+                "audioType": audio_type,
+                "enabled": enabled,
+                "playerCmd": self._player_cmd,
+                "volume": self.volume,
+                "filePath": str(path) if path else None,
+                **(additional_context or {})
+            }
+
+            if not enabled or path is None:
+                context["status"] = "skipped"
+                context["reason"] = "disabled" if not enabled else "file_not_found"
+                return False, path, context
+
+            # 線程安全的播放執行
+            return self._execute_playback_safe(path, context)
+
+    def _execute_playback_safe(self, path: Path, context: Dict[str, Any]) -> tuple[bool, Path, Dict[str, Any]]:
+        """執行音效播放，保證線程安全."""
+        try:
+            # 音效播放已經是異步和線程安全的
             if self._player_cmd == "winsound":
                 rc = _play_with_windows(str(path), volume=self.volume, timeout_s=self._timeout_s)
             else:
                 rc = _play_with(self._player_cmd, self._player_base_args + [str(path)], timeout_s=self._timeout_s)
-            
+
             success = (rc == 0)
-            context["status"] = "played" if success else "failed"
-            context["returnCode"] = rc
+            context.update({
+                "status": "played" if success else "failed",
+                "returnCode": rc
+            })
             return success, path, context
-            
-        context["status"] = "failed"
-        context["reason"] = "no_player_available"
-        return False, path, context
+
+        except Exception as e:
+            context.update({
+                "status": "failed",
+                "error": str(e)
+            })
+            return False, path, context
+
+    def play_audio(self, audio_type: str, enabled: bool = False, additional_context: Optional[Dict[str, Any]] = None) -> tuple[bool, Optional[Path], Dict[str, Any]]:
+        """向後兼容的音效播放方法."""
+        return self.play_audio_safe(audio_type, enabled, additional_context)
 
     # --- Throttling helpers -------------------------------------------------
     def _read_throttle(self) -> Dict[str, float]:
@@ -335,18 +358,183 @@ class AudioManager:
         except Exception:
             pass
 
-    def should_throttle(self, key: str, window_seconds: int, now: Optional[float] = None) -> bool:
-        """Return True if an event with `key` should be throttled.
+    def should_throttle_safe(self, key: str, window_seconds: int, now: Optional[float] = None) -> bool:
+        """線程安全的節流檢查.
 
-        Does not update the last-fired time. Call `mark_emitted` after actually acting.
+        Does not update the last-fired time. Call `mark_emitted_safe` after actually acting.
         """
         now = now or time.time()
-        data = self._read_throttle()
+        data = self._read_throttle_safe()
         last = float(data.get(key, 0))
         return (now - last) < float(window_seconds)
 
-    def mark_emitted(self, key: str, when: Optional[float] = None) -> None:
+    def mark_emitted_safe(self, key: str, when: Optional[float] = None) -> None:
+        """線程安全的發送標記."""
         when = when or time.time()
-        data = self._read_throttle()
+        data = self._read_throttle_safe()
         data[str(key)] = float(when)
-        self._write_throttle(data)
+        self._write_throttle_safe(data)
+
+    def should_throttle(self, key: str, window_seconds: int, now: Optional[float] = None) -> bool:
+        """向後兼容的節流檢查."""
+        return self.should_throttle_safe(key, window_seconds, now)
+
+    def mark_emitted(self, key: str, when: Optional[float] = None) -> None:
+        """向後兼容的發送標記."""
+        return self.mark_emitted_safe(key, when)
+
+    # --- Threading Safety Methods -------------------------------------------
+    
+    def _use_file_locking(self) -> bool:
+        """檢查是否可以使用檔案鎖定."""
+        try:
+            import fcntl  # Unix 系統
+            return True
+        except ImportError:
+            try:
+                import msvcrt  # Windows 系統
+                return True
+            except ImportError:
+                return False
+
+    def _read_with_file_lock(self, file_path: Path) -> Dict[str, float]:
+        """使用檔案鎖定讀取數據."""
+        import platform
+
+        if platform.system() == "Windows":
+            return self._read_windows_locked(file_path)
+        else:
+            return self._read_unix_locked(file_path)
+
+    def _read_unix_locked(self, file_path: Path) -> Dict[str, float]:
+        """Unix 系統檔案鎖定讀取."""
+        import fcntl
+
+        with open(file_path, 'r') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)  # 共享鎖
+            try:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    # ensure float values
+                    return {str(k): float(v) for k, v in data.items()}
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)  # 解鎖
+        return {}
+
+    def _read_windows_locked(self, file_path: Path) -> Dict[str, float]:
+        """Windows 系統檔案鎖定讀取."""
+        import msvcrt
+
+        with open(file_path, 'r') as f:
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+                data = json.load(f)
+                if isinstance(data, dict):
+                    # ensure float values
+                    return {str(k): float(v) for k, v in data.items()}
+            finally:
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        return {}
+
+    def _write_with_file_lock(self, file_path: Path, data: Dict[str, float]) -> None:
+        """使用檔案鎖定寫入數據."""
+        import platform
+
+        if platform.system() == "Windows":
+            self._write_windows_locked(file_path, data)
+        else:
+            self._write_unix_locked(file_path, data)
+
+    def _write_unix_locked(self, file_path: Path, data: Dict[str, float]) -> None:
+        """Unix 系統檔案鎖定寫入."""
+        import fcntl
+
+        with open(file_path, 'w') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # 獨占鎖
+            try:
+                json.dump(data, f, indent=2)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)  # 解鎖
+
+    def _write_windows_locked(self, file_path: Path, data: Dict[str, float]) -> None:
+        """Windows 系統檔案鎖定寫入."""
+        import msvcrt
+
+        with open(file_path, 'w') as f:
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+                json.dump(data, f, indent=2)
+            finally:
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+
+    def _read_throttle_safe(self) -> Dict[str, float]:
+        """線程安全的節流數據讀取，包含檔案鎖定."""
+        with self._throttle_lock:
+            try:
+                if not self._throttle_path.exists():
+                    return {}
+
+                # 跨平台檔案鎖定實作
+                if self._use_file_locking():
+                    return self._read_with_file_lock(self._throttle_path)
+                else:
+                    # 降級到無鎖定模式
+                    with open(self._throttle_path, 'r') as f:
+                        data = json.load(f)
+                        if isinstance(data, dict):
+                            return {str(k): float(v) for k, v in data.items()}
+                        return {}
+            except (FileNotFoundError, json.JSONDecodeError, OSError):
+                return {}
+
+    def _write_throttle_safe(self, data: Dict[str, float]) -> None:
+        """線程安全的節流數據寫入，包含檔案鎖定."""
+        with self._throttle_lock:
+            try:
+                self._throttle_path.parent.mkdir(parents=True, exist_ok=True)
+
+                if self._use_file_locking():
+                    self._write_with_file_lock(self._throttle_path, data)
+                else:
+                    # 降級到無鎖定模式
+                    with open(self._throttle_path, 'w') as f:
+                        json.dump(data, f, indent=2)
+            except OSError:
+                pass  # 靜默失敗，保持向後兼容性
+
+    def get_config_safe(self, key: str, default: Any = None) -> Any:
+        """線程安全的配置訪問."""
+        with self._config_lock:
+            return self._config_manager.get(key, default)
+
+    def reload_config_safe(self) -> None:
+        """線程安全的配置重載."""
+        with self._config_lock:
+            self._config_manager.clear_cache()
+
+            # 重新載入配置
+            cfg = _load_config(self._config_manager)
+
+            # 更新映射和音量設定
+            if "sound_files" in cfg:
+                mappings = cfg["sound_files"].get("mappings", {})
+                for raw_key, value in mappings.items():
+                    canonical = _canonical_audio_key(raw_key)
+                    self.config.mappings[canonical] = str(value)
+
+            if "audio_settings" in cfg:
+                volume = cfg["audio_settings"].get("volume")
+                if isinstance(volume, (int, float)):
+                    self.volume = max(0.0, min(1.0, float(volume)))
+
+    @contextmanager
+    def _performance_monitor(self, operation_name: str, warn_threshold_ms: float = 10.0):
+        """監控操作性能，檢查線程鎖定開銷."""
+        start = time.time()
+        try:
+            yield
+        finally:
+            duration = (time.time() - start) * 1000
+            if duration > warn_threshold_ms:
+                # 可選：記錄慢操作（用於調試）
+                pass
