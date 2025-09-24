@@ -15,20 +15,23 @@ import subprocess
 from dataclasses import dataclass
 import time
 from pathlib import Path
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Any
+
+from . import constants
+from .config_manager import ConfigManager
 
 
 _CANONICAL_AUDIO_KEYS = {
-    "stop": "Stop",
-    "subagentstop": "SubagentStop",
-    "notification": "Notification",
-    "agentstop": "SubagentStop",  # legacy alias
-    "usernotification": "Notification",  # legacy alias
-    "pretooluse": "PreToolUse",
-    "posttooluse": "PostToolUse",
-    "sessionstart": "SessionStart",
-    "sessionend": "SessionEnd",
-    "userpromptsubmit": "UserPromptSubmit",
+    "stop": constants.STOP,
+    "subagentstop": constants.SUBAGENT_STOP,
+    "notification": constants.NOTIFICATION,
+    "agentstop": constants.SUBAGENT_STOP,  # legacy alias
+    "usernotification": constants.NOTIFICATION,  # legacy alias
+    "pretooluse": constants.PRE_TOOL_USE,
+    "posttooluse": constants.POST_TOOL_USE,
+    "sessionstart": constants.SESSION_START,
+    "sessionend": constants.SESSION_END,
+    "userpromptsubmit": constants.USER_PROMPT_SUBMIT,
 }
 
 
@@ -39,13 +42,12 @@ def _canonical_audio_key(raw: str) -> str:
     return _CANONICAL_AUDIO_KEYS.get(key, raw)
 
 
-def _load_config(config_path: Path) -> Dict:
+def _load_config(config_manager: ConfigManager, config_filename: str = "audio_config.json") -> Dict:
+    """Load audio configuration using ConfigManager."""
     try:
-        if config_path.exists():
-            return json.loads(config_path.read_text(encoding="utf-8"))
+        return config_manager.get_config(config_filename)
     except Exception:
-        pass
-    return {}
+        return {}
 
 
 def _which(cmd: str) -> Optional[str]:
@@ -56,26 +58,29 @@ def _which(cmd: str) -> Optional[str]:
 
 def _play_with(cmd: str, args: list[str], timeout_s: float = 5.0) -> int:
     try:
-        # For audio players, we want fire-and-forget behavior
-        # Use Popen with detached process to avoid waiting for audio completion
-        p = subprocess.Popen([cmd] + args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # Quick check if process started successfully
-        if p.poll() is None:  # Process is still running (good)
-            return 0
-        else:  # Process exited immediately (likely error)
-            return p.returncode
+        # Goal 3: Asynchronous Audio Playbook - True fire-and-forget behavior
+        # Start detached process for non-blocking audio playback
+        p = subprocess.Popen(
+            [cmd] + args, 
+            stdout=subprocess.DEVNULL, 
+            stderr=subprocess.DEVNULL,
+            start_new_session=True  # Detach from parent process group
+        )
+        # Don't wait for completion - immediately return success if process started
+        # This ensures hooks execute in under 100ms as per Goal 3 requirements
+        return 0  # Assume success for fire-and-forget playback
     except Exception:
         return 1
 
 
 def _play_with_windows(filepath: str, volume: float = 1.0, timeout_s: float = 5.0) -> int:
-    """Windows-specific audio player using winsound with volume control"""
+    """Windows-specific audio player using winsound with volume control - Goal 3: Non-blocking"""
     try:
         import winsound
 
         if volume >= 1.0:
-            # No volume adjustment needed, play original file
-            winsound.PlaySound(str(filepath), winsound.SND_FILENAME)
+            # No volume adjustment needed, play original file asynchronously
+            winsound.PlaySound(str(filepath), winsound.SND_FILENAME | winsound.SND_ASYNC)
             return 0
 
         # Perform volume adjustment using standard library
@@ -101,16 +106,16 @@ def _play_with_windows(filepath: str, volume: float = 1.0, timeout_s: float = 5.
             out_wav.setframerate(framerate)
             out_wav.writeframes(adjusted_frames)
 
-        # Play adjusted audio from memory
+        # Play adjusted audio from memory asynchronously
         wav_data = wav_buffer.getvalue()
-        winsound.PlaySound(wav_data, winsound.SND_MEMORY)
+        winsound.PlaySound(wav_data, winsound.SND_MEMORY | winsound.SND_ASYNC)
         return 0
 
     except Exception:
-        # Fallback: play without volume control
+        # Fallback: play without volume control, still async
         try:
             import winsound
-            winsound.PlaySound(str(filepath), winsound.SND_FILENAME)
+            winsound.PlaySound(str(filepath), winsound.SND_FILENAME | winsound.SND_ASYNC)
             return 0
         except Exception:
             return 1
@@ -128,14 +133,18 @@ class AudioManager:
         # Project root is three levels up: utils -> hooks -> .claude -> <root>
         repo_root = here_path.parents[3]
 
+        # Initialize ConfigManager with the utils directory
+        config_dir = here_path.parent
+        self._config_manager = ConfigManager.get_instance([str(config_dir)])
+
         # 1) ENV override (highest priority)
         env_dir = os.getenv("CLAUDE_SOUNDS_DIR") or os.getenv("AUDIO_SOUNDS_DIR")
         sounds_dir = Path(env_dir).expanduser() if env_dir else None
         if sounds_dir and not sounds_dir.is_absolute():
             sounds_dir = repo_root / sounds_dir
 
-        # Load config early
-        cfg = _load_config(here_path.parent / "audio_config.json")
+        # Load config early using ConfigManager
+        cfg = _load_config(self._config_manager)
 
         # 2) Config base_path if ENV not set
         if not sounds_dir:
@@ -153,14 +162,14 @@ class AudioManager:
 
         # Defaults map to official event names
         mappings = {
-            "Stop": "task_complete.wav",
-            "SubagentStop": "agent_complete.wav",
-            "Notification": "user_prompt.wav",
-            "PreToolUse": "security_check.wav",
-            "PostToolUse": "task_complete.wav",
-            "SessionStart": "session_start.wav",
-            "SessionEnd": "session_complete.wav",
-            "UserPromptSubmit": "user_prompt.wav",
+            constants.STOP: "task_complete.wav",
+            constants.SUBAGENT_STOP: "agent_complete.wav",
+            constants.NOTIFICATION: "user_prompt.wav",
+            constants.PRE_TOOL_USE: "security_check.wav",
+            constants.POST_TOOL_USE: "task_complete.wav",
+            constants.SESSION_START: "session_start.wav",
+            constants.SESSION_END: "session_complete.wav",
+            constants.USER_PROMPT_SUBMIT: "user_prompt.wav",
         }
 
         # Optional config override (config wins over defaults)
@@ -227,8 +236,8 @@ class AudioManager:
     def resolve_file(self, audio_type: str) -> Optional[Path]:
         audio_type = self._normalize_key(audio_type)
         name = self.config.mappings.get(audio_type)
-        if name is None and audio_type == "SubagentStop":
-            name = self.config.mappings.get("Stop")
+        if name is None and audio_type == constants.SUBAGENT_STOP:
+            name = self.config.mappings.get(constants.STOP)
         if not name:
             return None
         p = self.config.base_path / str(name)
@@ -242,16 +251,32 @@ class AudioManager:
             return cfg_value
         return max(0, int(default_seconds))
 
-    def play_audio(self, audio_type: str, enabled: bool = False) -> tuple[bool, Optional[Path]]:
-        """Attempt to play local audio. Returns (played, path).
+    def play_audio(self, audio_type: str, enabled: bool = False, additional_context: Optional[Dict[str, Any]] = None) -> tuple[bool, Optional[Path], Dict[str, Any]]:
+        """Attempt to play local audio. Returns (played, path, context).
 
-        - If not enabled or file missing, returns (False, maybe_path)
+        Goal 3: Enhanced for structured communication via additionalContext
+        
+        - If not enabled or file missing, returns (False, maybe_path, context)
         - Does not raise on failure
+        - additional_context: Optional structured data for hook communication
         """
         audio_type = self._normalize_key(audio_type)
         path = self.resolve_file(audio_type)
+        
+        # Goal 3: Build structured context for hook communication
+        context = {
+            "audioType": audio_type,
+            "enabled": enabled,
+            "playerCmd": self._player_cmd,
+            "volume": self.volume,
+            "filePath": str(path) if path else None,
+            **(additional_context or {})
+        }
+        
         if not enabled or path is None:
-            return False, path
+            context["status"] = "skipped"
+            context["reason"] = "disabled" if not enabled else "file_not_found"
+            return False, path, context
 
         # Use cached player
         if self._player_cmd:
@@ -259,8 +284,15 @@ class AudioManager:
                 rc = _play_with_windows(str(path), volume=self.volume, timeout_s=self._timeout_s)
             else:
                 rc = _play_with(self._player_cmd, self._player_base_args + [str(path)], timeout_s=self._timeout_s)
-            return (rc == 0), path
-        return False, path
+            
+            success = (rc == 0)
+            context["status"] = "played" if success else "failed"
+            context["returnCode"] = rc
+            return success, path, context
+            
+        context["status"] = "failed"
+        context["reason"] = "no_player_available"
+        return False, path, context
 
     # --- Throttling helpers -------------------------------------------------
     def _read_throttle(self) -> Dict[str, float]:

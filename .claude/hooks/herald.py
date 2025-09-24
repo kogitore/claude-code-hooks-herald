@@ -22,7 +22,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, MutableMapping, Optional, Protocol, Tuple
 
+from utils import constants
 from utils.audio_manager import AudioManager
+from utils.audio_dispatcher import AudioDispatcher
 from utils.common_io import generate_audio_notes, parse_stdin
 from utils.decision_api import DecisionAPI
 from notification import NotificationHook
@@ -120,14 +122,14 @@ class HandlerEntry:
 
 
 DEFAULT_THROTTLE_WINDOWS: MutableMapping[str, int] = {
-    "Notification": 30,
-    "Stop": 600,
-    "SubagentStop": 600,
-    "PreToolUse": 60,
-    "PostToolUse": 45,
-    "SessionStart": 5,
-    "SessionEnd": 5,
-    "UserPromptSubmit": 10,
+    constants.NOTIFICATION: 30,
+    constants.STOP: 600,
+    constants.SUBAGENT_STOP: 600,
+    constants.PRE_TOOL_USE: 60,
+    constants.POST_TOOL_USE: 45,
+    constants.SESSION_START: 5,
+    constants.SESSION_END: 5,
+    constants.USER_PROMPT_SUBMIT: 10,
 }
 
 
@@ -154,6 +156,7 @@ class HeraldDispatcher:
         self.event_handlers: Dict[str, HandlerEntry] = {}
         self.middleware_chain: List[Tuple[str, MiddlewareCallable]] = []
         self.audio_manager = audio_manager or AudioManager()
+        self.audio_dispatcher = AudioDispatcher(self.audio_manager)  # 新增：音頻分派器
         self.decision_api = decision_api or DecisionAPI()
 
     # -- Registration -----------------------------------------------------
@@ -250,32 +253,22 @@ class HeraldDispatcher:
             or context.throttle_key
             or (handler_entry.throttle_key_factory(context) if handler_entry and handler_entry.throttle_key_factory else None)
         )
-        if not throttle_key and resolved_audio_type:
-            throttle_key = _default_throttle_key(context, resolved_audio_type)
-
-        audio_played = False
-        audio_path: Optional[Path] = None
-        throttled = False
-
-        if resolved_audio_type and not context.stop_dispatch and not handler_response.suppress_audio:
-            throttle_window = int(throttle_window or 0)
-            throttle_key = throttle_key or _default_throttle_key(context, resolved_audio_type)
-            window = self.audio_manager.get_throttle_window(resolved_audio_type, throttle_window)
-            if window > 0 and throttle_key:
-                throttled = self.audio_manager.should_throttle(throttle_key, window)
-            if not throttled:
-                audio_played, audio_path = self.audio_manager.play_audio(resolved_audio_type, enabled=enable_audio)
-                if throttle_key:
-                    self.audio_manager.mark_emitted(throttle_key)
-            context.notes.extend(
-                generate_audio_notes(
-                    throttled=throttled,
-                    path=audio_path,
-                    played=audio_played,
-                    enabled=enable_audio,
-                    throttle_msg=f"Throttled (<= {window}s)",
-                )
-            )
+        # 使用 AudioDispatcher 處理音頻邏輯 (階段 1 重構)
+        audio_report = self.audio_dispatcher.handle_audio(
+            context, 
+            handler_response, 
+            enable_audio=enable_audio
+        )
+        
+        # 從 AudioReport 提取兼容的變數（向後兼容）
+        audio_played = audio_report.played
+        audio_path = audio_report.audio_path
+        throttled = audio_report.throttled
+        resolved_audio_type = audio_report.resolved_audio_type
+        
+        # 將音頻註記和錯誤添加到 context
+        context.notes.extend(audio_report.notes)
+        context.errors.extend(audio_report.errors)
 
         context.notes.extend(handler_response.notes)
 
@@ -287,19 +280,19 @@ class HeraldDispatcher:
         if handler_response.decision_payload:
             decision_data = handler_response.decision_payload
 
-            if event_type == "PreToolUse":
+            if event_type == constants.PRE_TOOL_USE:
                 # PreToolUse specific schema
                 response["hookSpecificOutput"] = {
-                    "hookEventName": "PreToolUse",
+                    "hookEventName": constants.PRE_TOOL_USE,
                     "permissionDecision": decision_data.get("permissionDecision", "allow")
                 }
                 if "permissionDecisionReason" in decision_data:
                     response["hookSpecificOutput"]["permissionDecisionReason"] = decision_data["permissionDecisionReason"]
 
-            elif event_type == "UserPromptSubmit":
+            elif event_type == constants.USER_PROMPT_SUBMIT:
                 # UserPromptSubmit specific schema
                 response["hookSpecificOutput"] = {
-                    "hookEventName": "UserPromptSubmit",
+                    "hookEventName": constants.USER_PROMPT_SUBMIT,
                     "additionalContext": decision_data.get("additionalContext", "")
                 }
             else:
@@ -428,21 +421,21 @@ def build_default_dispatcher(
         hr.throttle_window = result.throttle_window
         return hr
 
-    dispatcher.register_handler("Notification", _hook_handler("Notification", notification_hook), audio_type="Notification")
-    dispatcher.register_handler("Stop", lambda ctx: _stop_handler(ctx, stop_hook), audio_type="Stop")
-    dispatcher.register_handler("SubagentStop", lambda ctx: _stop_handler(ctx, subagent_hook), audio_type="SubagentStop")
-    dispatcher.register_handler("PreToolUse", _hook_handler("PreToolUse", pre_tool_use_hook), audio_type="PreToolUse", throttle_window=pre_tool_use_hook.default_throttle_seconds)
-    dispatcher.register_handler("PostToolUse", _hook_handler("PostToolUse", post_tool_use_hook), audio_type="PostToolUse", throttle_window=post_tool_use_hook.default_throttle_seconds)
-    dispatcher.register_handler("SessionStart", _hook_handler("SessionStart", session_start_hook), audio_type="SessionStart", throttle_window=session_start_hook.default_throttle_seconds)
-    dispatcher.register_handler("SessionEnd", _hook_handler("SessionEnd", session_end_hook), audio_type="SessionEnd", throttle_window=session_end_hook.default_throttle_seconds)
-    dispatcher.register_handler("UserPromptSubmit", _hook_handler("UserPromptSubmit", user_prompt_hook), audio_type="UserPromptSubmit", throttle_window=user_prompt_hook.default_throttle_seconds)
+    dispatcher.register_handler(constants.NOTIFICATION, _hook_handler(constants.NOTIFICATION, notification_hook), audio_type=constants.NOTIFICATION)
+    dispatcher.register_handler(constants.STOP, lambda ctx: _stop_handler(ctx, stop_hook), audio_type=constants.STOP)
+    dispatcher.register_handler(constants.SUBAGENT_STOP, lambda ctx: _stop_handler(ctx, subagent_hook), audio_type=constants.SUBAGENT_STOP)
+    dispatcher.register_handler(constants.PRE_TOOL_USE, _hook_handler(constants.PRE_TOOL_USE, pre_tool_use_hook), audio_type=constants.PRE_TOOL_USE, throttle_window=pre_tool_use_hook.default_throttle_seconds)
+    dispatcher.register_handler(constants.POST_TOOL_USE, _hook_handler(constants.POST_TOOL_USE, post_tool_use_hook), audio_type=constants.POST_TOOL_USE, throttle_window=post_tool_use_hook.default_throttle_seconds)
+    dispatcher.register_handler(constants.SESSION_START, _hook_handler(constants.SESSION_START, session_start_hook), audio_type=constants.SESSION_START, throttle_window=session_start_hook.default_throttle_seconds)
+    dispatcher.register_handler(constants.SESSION_END, _hook_handler(constants.SESSION_END, session_end_hook), audio_type=constants.SESSION_END, throttle_window=session_end_hook.default_throttle_seconds)
+    dispatcher.register_handler(constants.USER_PROMPT_SUBMIT, _hook_handler(constants.USER_PROMPT_SUBMIT, user_prompt_hook), audio_type=constants.USER_PROMPT_SUBMIT, throttle_window=user_prompt_hook.default_throttle_seconds)
 
     def _noop_handler(_: DispatchContext) -> HandlerResult:
         hr = HandlerResult()
         hr.suppress_audio = True
         return hr
 
-    dispatcher.register_handler("PreCompact", _noop_handler, audio_type=None)
+    dispatcher.register_handler(constants.PRE_COMPACT, _noop_handler, audio_type=None)
 
     return dispatcher
 

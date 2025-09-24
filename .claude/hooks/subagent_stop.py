@@ -9,10 +9,11 @@ from typing import Dict, Optional
 
 from utils.base_hook import BaseHook, HookExecutionResult
 from utils.common_io import parse_stdin
+from utils.constants import SUBAGENT_STOP
 
 
 class SubagentStopHook(BaseHook):
-    default_audio_event = "SubagentStop"
+    default_audio_event = SUBAGENT_STOP
     default_throttle_seconds = 120
 
     def __init__(self, **kwargs):

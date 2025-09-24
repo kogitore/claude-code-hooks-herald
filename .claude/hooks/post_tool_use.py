@@ -56,6 +56,7 @@ from typing import Any, Dict, Optional
 
 from utils.base_hook import BaseHook, HookExecutionResult
 from utils.common_io import parse_stdin
+from utils.constants import POST_TOOL_USE
 from utils.decision_api import DecisionAPI, DecisionResponse
 
 
@@ -77,7 +78,7 @@ class PostToolUseProcessing:
 class PostToolUseHook(BaseHook):
     """PostToolUse hook for tool execution result processing."""
 
-    default_audio_event = "PostToolUse"
+    default_audio_event = POST_TOOL_USE
     default_throttle_seconds = 45
 
     def __init__(
@@ -102,7 +103,7 @@ class PostToolUseHook(BaseHook):
     def handle_error(self, error: Exception) -> Dict[str, Any]:  # type: ignore[override]
         fallback = self._decision_api.block(
             "工具結果處理失敗，已阻擋後續流程",
-            event="PostToolUse",
+            event=POST_TOOL_USE,
             additional_context={"error": type(error).__name__},
             severity="high",
             tags=["posttooluse:exception"],
@@ -156,7 +157,7 @@ class PostToolUseHook(BaseHook):
 
         result = HookExecutionResult()
         result.payload["hookSpecificOutput"] = {
-            "hookEventName": "PostToolUse",
+            "hookEventName": POST_TOOL_USE,
             "additionalContext": additional_context,
         }
 

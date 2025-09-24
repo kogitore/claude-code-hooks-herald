@@ -43,6 +43,12 @@ def main() -> int:
         ".claude/hooks/tests/test_session_management.py",
         # Herald dispatcher 測試 (包含 CLI 測試)
         ".claude/hooks/tests/test_dispatcher.py",
+        # ConfigManager 測試
+        ".claude/hooks/tests/test_config_manager.py",
+        # 驗證測試 (移動過來的)
+        ".claude/hooks/tests/test_fix_verification.py",
+        ".claude/hooks/tests/test_goal3_verification.py",
+        ".claude/hooks/tests/test_integration_verification.py",
     ]
 
     rc_accum = 0

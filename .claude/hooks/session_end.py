@@ -65,6 +65,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from utils.base_hook import BaseHook, HookExecutionResult
 from utils.common_io import parse_stdin
+from utils.constants import SESSION_END
 from utils.session_storage import append_event_log, load_state, utc_timestamp, write_state
 
 
@@ -78,7 +79,7 @@ class SessionEndResult:
 class SessionEndHook(BaseHook):
     """SessionEnd hook for session cleanup and finalization."""
 
-    default_audio_event = "SessionEnd"
+    default_audio_event = SESSION_END
     default_throttle_seconds = 5
 
     def __init__(self, **kwargs: Any) -> None:
@@ -117,7 +118,7 @@ class SessionEndHook(BaseHook):
 
         hook_result = HookExecutionResult()
         hook_result.payload["hookSpecificOutput"] = {
-            "hookEventName": "SessionEnd",
+            "hookEventName": SESSION_END,
             "additionalContext": result.context,
         }
         if result.skipped_resources:

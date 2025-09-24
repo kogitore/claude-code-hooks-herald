@@ -59,6 +59,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from utils.base_hook import BaseHook, HookExecutionResult
 from utils.common_io import parse_stdin
+from utils.constants import USER_PROMPT_SUBMIT
 
 
 PROMPT_LOG_PATH = Path(__file__).resolve().parents[2] / "logs" / "prompt_submissions.jsonl"
@@ -85,7 +86,7 @@ class PromptProcessingResult:
 class UserPromptSubmitHook(BaseHook):
     """UserPromptSubmit hook for user input processing and validation."""
 
-    default_audio_event = "UserPromptSubmit"
+    default_audio_event = USER_PROMPT_SUBMIT
     default_throttle_seconds = 10
 
     def __init__(self, **kwargs: Any) -> None:
@@ -153,7 +154,7 @@ class UserPromptSubmitHook(BaseHook):
 
         result = HookExecutionResult()
         result.payload["hookSpecificOutput"] = {
-            "hookEventName": "UserPromptSubmit",
+            "hookEventName": USER_PROMPT_SUBMIT,
             "additionalContext": json.dumps(context_payload, ensure_ascii=False),
         }
 

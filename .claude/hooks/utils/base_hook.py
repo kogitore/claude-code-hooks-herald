@@ -23,7 +23,10 @@ from .common_io import generate_audio_notes
 
 @dataclass
 class HookExecutionResult:
-    """Encapsulates the outcome of a hook execution cycle."""
+    """Encapsulates the outcome of a hook execution cycle.
+    
+    Goal 3: Enhanced with additionalContext for structured communication.
+    """
 
     continue_value: bool = True
     payload: Dict[str, Any] = field(default_factory=dict)
@@ -35,10 +38,23 @@ class HookExecutionResult:
     throttled: bool = False
     notes: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+    # Goal 3: Additional context for structured hook communication
+    additional_context: Dict[str, Any] = field(default_factory=dict)
+    audio_context: Dict[str, Any] = field(default_factory=dict)
 
     def build_response(self) -> Dict[str, Any]:
+        """Build response with Goal 3 additionalContext support."""
         response = {"continue": self.continue_value}
         response.update(self.payload)
+        
+        # Goal 3: Include additionalContext in response for structured communication
+        if self.additional_context or self.audio_context:
+            context = {}
+            context.update(self.additional_context)
+            if self.audio_context:
+                context["audioContext"] = self.audio_context
+            response["additionalContext"] = context
+            
         return response
 
 
@@ -151,7 +167,7 @@ class BaseHook(abc.ABC):
 
         throttle_key = throttle_key or self._default_throttle_key(audio_event, result)
 
-        played, path, throttled = self._play_audio(
+        played, path, throttled, audio_context = self._play_audio(
             audio_event,
             enable_audio=enable_audio,
             throttle_key=throttle_key,
@@ -164,6 +180,8 @@ class BaseHook(abc.ABC):
         result.audio_played = played
         result.audio_path = path
         result.throttled = throttled
+        # Goal 3: Store audio context for structured communication
+        result.audio_context = audio_context
         result.notes.extend(
             generate_audio_notes(
                 throttled=throttled,
@@ -181,17 +199,41 @@ class BaseHook(abc.ABC):
         enable_audio: bool,
         throttle_key: Optional[str],
         throttle_seconds: int,
-    ) -> Tuple[bool, Optional[Path], bool]:
+    ) -> Tuple[bool, Optional[Path], bool, Dict[str, Any]]:
         throttled = False
         path = self.audio_manager.resolve_file(audio_event)
         played = False
+        audio_context = {}
+        
         if throttle_seconds > 0 and throttle_key:
             throttled = self.audio_manager.should_throttle(throttle_key, throttle_seconds)
+            
         if not throttled and enable_audio:
-            played, path = self.audio_manager.play_audio(audio_event, enabled=True)
+            # Goal 3: Use enhanced play_audio with additionalContext support
+            additional_context = {
+                "hookType": self.__class__.__name__,
+                "throttleKey": throttle_key,
+                "throttleWindow": throttle_seconds,
+                "eventName": audio_event
+            }
+            played, path, audio_context = self.audio_manager.play_audio(
+                audio_event, 
+                enabled=True, 
+                additional_context=additional_context
+            )
             if throttle_key:
                 self.audio_manager.mark_emitted(throttle_key)
-        return played, path, throttled
+        else:
+            # Provide context even when not playing
+            audio_context = {
+                "audioType": audio_event,
+                "enabled": enable_audio,
+                "status": "throttled" if throttled else "disabled",
+                "hookType": self.__class__.__name__,
+                "filePath": str(path) if path else None
+            }
+                
+        return played, path, throttled, audio_context
 
     def _default_throttle_key(self, audio_event: str, result: HookExecutionResult) -> str:
         marker = None

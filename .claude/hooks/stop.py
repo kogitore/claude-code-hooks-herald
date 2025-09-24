@@ -9,10 +9,11 @@ from typing import Dict, Optional
 
 from utils.base_hook import BaseHook, HookExecutionResult
 from utils.common_io import parse_stdin
+from utils.constants import STOP
 
 
 class StopHook(BaseHook):
-    default_audio_event = "Stop"
+    default_audio_event = STOP
     default_throttle_seconds = 120
 
     def __init__(self, **kwargs):

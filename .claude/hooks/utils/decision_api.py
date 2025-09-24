@@ -8,13 +8,14 @@ conservative built-in defaults that prioritise safety while keeping UX simple.
 """
 from __future__ import annotations
 
-import json
 import re
 from copy import deepcopy
 from dataclasses import dataclass, field
 from hashlib import sha1
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from .config_manager import ConfigManager
 
 
 _DEFAULT_POLICY = {
@@ -182,7 +183,12 @@ class _CompiledRule:
 class DecisionAPI:
     def __init__(self, policy_path: Optional[Path] = None) -> None:
         self.policy_path = policy_path or self._default_policy_path()
-        self.policy = self._load_policy(self.policy_path)
+        
+        # Initialize ConfigManager with the directory containing decision policy files
+        config_dir = self.policy_path.parent
+        self._config_manager = ConfigManager.get_instance([str(config_dir)])
+        
+        self.policy = self._load_policy()
         self._tag_matcher = TagMatcher()
         self._pre_rules: List[_CompiledRule] = self._compile_pre_rules(self.policy)
 
@@ -486,13 +492,19 @@ class DecisionAPI:
         here = Path(__file__).resolve()
         return here.parent / "decision_policy.json"
 
-    def _load_policy(self, path: Path) -> Dict[str, Any]:
-        if path.exists():
-            try:
-                user_policy = json.loads(path.read_text(encoding="utf-8"))
+    def _load_policy(self) -> Dict[str, Any]:
+        """Load policy using ConfigManager with fallback to defaults."""
+        policy_filename = self.policy_path.name
+        
+        try:
+            # Use ConfigManager to load the policy file
+            user_policy = self._config_manager.get_config(policy_filename)
+            if user_policy:  # ConfigManager returns empty dict if file not found
                 return self._merge_policy(deepcopy(_DEFAULT_POLICY), user_policy)
-            except Exception:
-                pass
+        except Exception:
+            # ConfigManager handles errors gracefully, but we add extra safety
+            pass
+        
         return deepcopy(_DEFAULT_POLICY)
 
     def _merge_policy(self, base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:

@@ -43,6 +43,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from utils.base_hook import BaseHook, HookExecutionResult
 from utils.common_io import parse_stdin
 from utils.decision_api import DecisionAPI, DecisionResponse
+from utils.constants import PRE_TOOL_USE
 
 
 MAX_COMMAND_PREVIEW = 240
@@ -63,7 +64,7 @@ class PreToolUseAuditRecord:
 class PreToolUseHook(BaseHook):
     """PreToolUse hook implementing Decision API for tool execution security."""
 
-    default_audio_event = "PreToolUse"
+    default_audio_event = PRE_TOOL_USE
     default_throttle_seconds = 60
 
     def __init__(
@@ -88,7 +89,7 @@ class PreToolUseHook(BaseHook):
     def handle_error(self, error: Exception) -> Dict[str, Any]:  # type: ignore[override]
         fallback = self._decision_api.ask(
             "決策服務發生異常，請人工確認",
-            event="PreToolUse",
+            event=PRE_TOOL_USE,
             additional_context={"error": type(error).__name__},
             severity="high",
         )
@@ -124,7 +125,7 @@ class PreToolUseHook(BaseHook):
         except Exception as exc:
             decision = self._decision_api.ask(
                 "無法評估工具安全性，請人工確認",
-                event="PreToolUse",
+                event=PRE_TOOL_USE,
                 additional_context={"tool": tool, "error": type(exc).__name__},
                 severity="high",
             )
@@ -133,7 +134,7 @@ class PreToolUseHook(BaseHook):
         if not decision.blocked and issues:
             decision = self._decision_api.ask(
                 "工具輸入格式不明確，請人工確認",
-                event="PreToolUse",
+                event=PRE_TOOL_USE,
                 additional_context=additional_context,
                 severity=decision.severity or "medium",
                 tags=(decision.tags or []) + ["pretooluse:input-warning"],

@@ -63,6 +63,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from utils.audio_manager import AudioManager
 from utils.base_hook import BaseHook, HookExecutionResult
 from utils.common_io import parse_stdin
+from utils.constants import SESSION_START
 from utils.session_storage import append_event_log, load_state, utc_timestamp, write_state
 
 
@@ -76,7 +77,7 @@ class SessionStartResult:
 class SessionStartHook(BaseHook):
     """SessionStart hook for session initialization and setup."""
 
-    default_audio_event = "SessionStart"
+    default_audio_event = SESSION_START
     default_throttle_seconds = 5
 
     def __init__(self, **kwargs: Any) -> None:
@@ -115,7 +116,7 @@ class SessionStartHook(BaseHook):
 
         hook_result = HookExecutionResult()
         hook_result.payload["hookSpecificOutput"] = {
-            "hookEventName": "SessionStart",
+            "hookEventName": SESSION_START,
             "additionalContext": result.context,
         }
         if result.warnings:

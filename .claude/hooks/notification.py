@@ -9,10 +9,11 @@ from typing import Dict, Optional
 
 from utils.base_hook import BaseHook, HookExecutionResult
 from utils.common_io import parse_stdin
+from utils.constants import NOTIFICATION
 
 
 class NotificationHook(BaseHook):
-    default_audio_event = "Notification"
+    default_audio_event = NOTIFICATION
     default_throttle_seconds = 30
 
     def __init__(self, **kwargs):
