@@ -57,3 +57,17 @@ _pending_rewrite/
 
 roadmap/
 docs/
+
+# Architecture analysis files - temporary, not part of code
+HOOKS_ARCHITECTURE.md
+HOOKS_ARCHITECTURE_Linus_fix.md
+linus.md
+TREE.md
+
+# Test files - temporary
+test_audio_basic.py
+test_audio_threading.py
+temp_test_config_dir/
+
+# Backup files
+*.backup
