@@ -77,86 +77,24 @@ _DEFAULT_POLICY = {
 _SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 
 
-@dataclass(frozen=True)
-class TagDefinition:
-    rule_type: str
-    pattern: str
-    severity: Optional[str] = None
-    description: Optional[str] = None
+@dataclass
+class SimpleRule:
+    type: str
+    action: str
+    pattern: re.Pattern
+    reason: str
+    severity: str = 'medium'
 
 
-_TAG_LIBRARY: Dict[str, TagDefinition] = {
-    "system:dangerous": TagDefinition(
-        rule_type="command",
-        pattern=r"(?:^|[;&|]\s*)(?:rm\s+-rf\s+(?:/|~|\$HOME)|shutdown|halt|reboot)\b",
-        severity="critical",
-        description="Potentially destructive system commands",
-    ),
-    "package:install": TagDefinition(
-        rule_type="command",
-        pattern=r"(?:^|[;&|]\s*)(?:npm|pnpm|yarn|pip|poetry|uvx?)\s+(?:install|add|update)\b",
-        severity="medium",
-        description="Package installation or upgrade",
-    ),
-    "package:remove": TagDefinition(
-        rule_type="command",
-        pattern=r"(?:^|[;&|]\s*)(?:npm|pnpm|yarn|pip|poetry|uvx?)\s+(?:uninstall|remove)\b",
-        severity="medium",
-    ),
-    "git:destructive": TagDefinition(
-        rule_type="command",
-        pattern=r"(?:^|[;&|]\s*)git\s+(?:reset\s+--hard|clean\s+-fd|checkout\s+--|restore\s+--source)\b",
-        severity="high",
-        description="Git commands that drop local changes",
-    ),
-    "secrets:file": TagDefinition(
-        rule_type="path",
-        pattern=r"\.env(?:\.|$)|secret|credentials|id_(?:rsa|ed25519)|\.pem$",
-        severity="high",
-    ),
-    "dependency:lock": TagDefinition(
-        rule_type="path",
-        pattern=r"(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|poetry\.lock|requirements(?:\.(txt|in))?)$",
-        severity="medium",
-    ),
+# 簡化的內建危險命令模式 - 直接定義，無需複雜抽象化
+_DANGEROUS_PATTERNS = {
+    'system_destructive': r"(?:^|[;&|]\s*)(?:rm\s+-rf\s+(?:/|~|\$HOME)|shutdown|halt|reboot)\b",
+    'package_management': r"(?:^|[;&|]\s*)(?:npm|pnpm|yarn|pip|poetry|uvx?)\s+(?:install|add|update|uninstall|remove)\b",
+    'git_destructive': r"(?:^|[;&|]\s*)git\s+(?:reset\s+--hard|clean\s+-fd|checkout\s+--|restore\s+--source)\b",
 }
 
 
-class TagMatcher:
-    def __init__(self, registry: Optional[Dict[str, TagDefinition]] = None) -> None:
-        self.registry = registry or _TAG_LIBRARY
-
-    def build(
-        self, tags: List[str], explicit_type: Optional[str] = None
-    ) -> Tuple[Optional[str], Optional[str], Optional[str], List[str]]:
-        patterns: List[str] = []
-        resolved_tags: List[str] = []
-        severities: List[str] = []
-        rule_type = explicit_type
-
-        for tag in tags:
-            definition = self.registry.get(tag)
-            if not definition:
-                continue
-            resolved_tags.append(tag)
-            if rule_type is None:
-                rule_type = definition.rule_type
-            if rule_type == definition.rule_type:
-                patterns.append(definition.pattern)
-            if definition.severity:
-                severities.append(definition.severity)
-
-        if not patterns:
-            return explicit_type, None, None, resolved_tags
-
-        combined_pattern = "|".join(f"(?:{p})" for p in patterns)
-        severity = self._max_severity(severities)
-        return rule_type or "command", combined_pattern, severity, resolved_tags
-
-    def _max_severity(self, severities: List[str]) -> Optional[str]:
-        if not severities:
-            return None
-        return max(severities, key=lambda s: _SEVERITY_ORDER.get(s, -1))
+# TagMatcher 移除 - 使用簡化的內聯匹配邏輯
 
 
 @dataclass
@@ -170,27 +108,22 @@ class DecisionResponse:
         return self.payload
 
 
-@dataclass
-class _CompiledRule:
-    rule_type: str
-    action: str
-    pattern: re.Pattern[str]
-    reason: str
-    tags: List[str] = field(default_factory=list)
-    severity: Optional[str] = None
+# _CompiledRule 移除 - 使用 SimpleRule 替代
 
 
 class DecisionAPI:
-    def __init__(self, policy_path: Optional[Path] = None) -> None:
+    def __init__(self, config_manager: Optional[ConfigManager] = None, policy_path: Optional[Path] = None) -> None:
+        # 優先使用傳入的 config_manager
+        self.config_manager = config_manager or ConfigManager.get_instance()
         self.policy_path = policy_path or self._default_policy_path()
         
-        # Initialize ConfigManager with the directory containing decision policy files
-        config_dir = self.policy_path.parent
-        self._config_manager = ConfigManager.get_instance([str(config_dir)])
+        # 簡化的政策載入
+        self.policy = self._load_simple_policy()
         
-        self.policy = self._load_policy()
-        self._tag_matcher = TagMatcher()
-        self._pre_rules: List[_CompiledRule] = self._compile_pre_rules(self.policy)
+        # 編譯簡化的規則
+        self._compiled_rules: List[SimpleRule] = self._compile_rules(
+            self.policy.get("pre_tool_use", {}).get("rules", [])
+        )
 
     # -- Public decision helpers -----------------------------------------
     def pre_tool_use_decision(self, tool_name: str, tool_input: Optional[Dict[str, Any]]) -> DecisionResponse:
@@ -198,14 +131,14 @@ class DecisionAPI:
         paths = self._extract_paths(tool_input)
         context_base = {"tool": tool_name}
 
-        for rule in self._pre_rules:
-            if rule.rule_type == "command" and command_blob:
+        for rule in self._compiled_rules:
+            if rule.type == "command" and command_blob:
                 if rule.pattern.search(command_blob):
-                    return self._build_pre_response(rule, context_base, command_blob)
-            elif rule.rule_type == "path" and paths:
+                    return self._build_simple_response(rule, context_base, command_blob)
+            elif rule.type == "path" and paths:
                 matched_path = self._match_path(rule.pattern, paths)
                 if matched_path:
-                    return self._build_pre_response(rule, context_base, matched_path)
+                    return self._build_simple_response(rule, context_base, matched_path)
 
         return self.allow(event="PreToolUse", additional_context=context_base)
 
@@ -248,13 +181,7 @@ class DecisionAPI:
         severity: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ) -> DecisionResponse:
-        return self._wrap_permission(
-            "allow",
-            event=event,
-            additional_context=additional_context,
-            severity=severity,
-            tags=tags,
-        )
+        return self._build_response('allow', event=event, **(additional_context or {}))
 
     def deny(
         self,
@@ -265,16 +192,7 @@ class DecisionAPI:
         severity: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ) -> DecisionResponse:
-        body = {"permissionDecisionReason": reason}
-        return self._wrap_permission(
-            "deny",
-            body=body,
-            event=event,
-            additional_context=additional_context,
-            blocked=True,
-            severity=severity,
-            tags=tags,
-        )
+        return self._build_response('deny', reason=reason, event=event, **(additional_context or {}))
 
     def ask(
         self,
@@ -285,16 +203,7 @@ class DecisionAPI:
         severity: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ) -> DecisionResponse:
-        body = {"permissionDecisionReason": reason}
-        return self._wrap_permission(
-            "ask",
-            body=body,
-            event=event,
-            additional_context=additional_context,
-            blocked=True,
-            severity=severity,
-            tags=tags,
-        )
+        return self._build_response('ask', reason=reason, event=event, **(additional_context or {}))
 
     def block(
         self,
@@ -305,15 +214,7 @@ class DecisionAPI:
         severity: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ) -> DecisionResponse:
-        payload = {"decision": "block", "reason": reason}
-        return self._wrap(
-            event=event,
-            payload=payload,
-            additional_context=additional_context,
-            blocked=True,
-            severity=severity,
-            tags=tags,
-        )
+        return self._build_response('block', reason=reason, event=event, **(additional_context or {}))
 
     def block_stop(
         self,
@@ -338,93 +239,44 @@ class DecisionAPI:
         severity: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ) -> DecisionResponse:
-        payload = {"decision": "approve"}
-        return self._wrap(
-            event="Stop",
-            payload=payload,
-            additional_context=additional_context,
-            blocked=False,
-            severity=severity,
-            tags=tags,
-        )
+        return self._build_response('approve', event='Stop', **(additional_context or {}))
 
     # -- Internal helpers -------------------------------------------------
-    def _wrap_permission(
-        self,
-        decision: str,
-        *,
-        body: Optional[Dict[str, Any]] = None,
-        event: Optional[str],
-        additional_context: Optional[Dict[str, Any]],
-        blocked: bool = False,
-        severity: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-    ) -> DecisionResponse:
-        payload = {"permissionDecision": decision}
-        if body:
-            payload.update(body)
-        return self._wrap(
-            event=event,
-            payload=payload,
-            additional_context=additional_context,
-            blocked=blocked,
-            severity=severity,
-            tags=tags,
-        )
+    def _build_response(self, action: str, reason: str = None, 
+                       event: str = None, blocked: bool = False, **context) -> DecisionResponse:
+        """\u7d71\u4e00\u7684\u56de\u61c9\u5efa\u69cb\u5668 - \u5408\u4f75\u6240\u6709\u56de\u61c9\u985e\u578b"""
+        if action == 'allow':
+            payload = {"permissionDecision": "allow"}
+        elif action in ['deny', 'ask']:
+            payload = {"permissionDecision": action, "permissionDecisionReason": reason}
+            blocked = True
+        elif action == 'block':
+            payload = {"decision": "block", "reason": reason}
+            blocked = True
+        elif action == 'approve':
+            payload = {"decision": "approve"}
+        else:
+            payload = {"permissionDecision": "allow"}
 
-    def _wrap(
-        self,
-        *,
-        event: Optional[str],
-        payload: Dict[str, Any],
-        additional_context: Optional[Dict[str, Any]],
-        blocked: bool,
-        severity: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-    ) -> DecisionResponse:
-        context_copy = dict(additional_context or {})
-        if tags:
-            context_copy.setdefault("tags", tags)
-        if severity:
-            context_copy.setdefault("severity", severity)
-        if context_copy:
-            payload = {**payload, "additionalContext": context_copy}
+        if context:
+            payload["additionalContext"] = context
 
         if event:
-            hook_output = {"hookEventName": event, **payload}
-            payload = {**payload, "hookSpecificOutput": hook_output}
+            payload["hookSpecificOutput"] = {"hookEventName": event, **payload}
 
-        return DecisionResponse(payload=payload, blocked=blocked, severity=severity, tags=tags or [])
+        return DecisionResponse(payload=payload, blocked=blocked)
 
-    def _build_pre_response(self, rule: _CompiledRule, base_context: Dict[str, Any], matched_value: str) -> DecisionResponse:
+    def _build_simple_response(self, rule: SimpleRule, base_context: Dict[str, Any], matched_value: str) -> DecisionResponse:
+        """簡化的回應建構器 - 直接使用 rule 屬性"""
         hashed = sha1(matched_value.encode("utf-8")).hexdigest()[:12]
         context = {**base_context, "rule": rule.action, "pattern": rule.pattern.pattern, "matchDigest": hashed}
-        if rule.tags:
-            context.setdefault("tags", rule.tags)
-        if rule.severity:
-            context.setdefault("severity", rule.severity)
+        
         if rule.action == "deny":
-            return self.deny(
-                rule.reason,
-                event="PreToolUse",
-                additional_context=context,
-                severity=rule.severity,
-                tags=rule.tags,
-            )
-        if rule.action == "ask":
-            return self.ask(
-                rule.reason,
-                event="PreToolUse",
-                additional_context=context,
-                severity=rule.severity,
-                tags=rule.tags,
-            )
-        return self.allow(
-            event="PreToolUse",
-            additional_context=context,
-            severity=rule.severity,
-            tags=rule.tags,
-        )
+            return self.deny(rule.reason, event="PreToolUse", additional_context=context)
+        elif rule.action == "ask":
+            return self.ask(rule.reason, event="PreToolUse", additional_context=context)
+        else:
+            return self.allow(event="PreToolUse", additional_context=context)
 
     # -- Extraction utilities --------------------------------------------
     def _extract_command(self, tool_input: Optional[Dict[str, Any]]) -> str:
@@ -492,78 +344,37 @@ class DecisionAPI:
         here = Path(__file__).resolve()
         return here.parent / "decision_policy.json"
 
-    def _load_policy(self) -> Dict[str, Any]:
-        """Load policy using ConfigManager with fallback to defaults."""
-        policy_filename = self.policy_path.name
-        
-        try:
-            # Use ConfigManager to load the policy file
-            user_policy = self._config_manager.get_config(policy_filename)
-            if user_policy:  # ConfigManager returns empty dict if file not found
-                return self._merge_policy(deepcopy(_DEFAULT_POLICY), user_policy)
-        except Exception:
-            # ConfigManager handles errors gracefully, but we add extra safety
-            pass
-        
-        return deepcopy(_DEFAULT_POLICY)
-
-    def _merge_policy(self, base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
-        for key, value in overrides.items():
-            if key not in base:
-                base[key] = value
-                continue
-            if isinstance(base[key], dict) and isinstance(value, dict):
-                base[key] = self._merge_policy(dict(base[key]), value)
-            elif isinstance(base[key], list) and isinstance(value, list):
-                if key == "rules":
-                    base[key] = base[key] + value
-                else:
-                    base[key] = value
+    def _load_simple_policy(self) -> Dict[str, Any]:
+        """Simple policy loading with ConfigManager integration."""
+        user_policy = self.config_manager.get('decision_policy', {})
+        # 簡單字典合併，避免深度遞歸
+        result = deepcopy(_DEFAULT_POLICY)
+        for section, rules in user_policy.items():
+            if section in result and isinstance(rules, dict):
+                result[section].update(rules)
             else:
-                base[key] = value
-        return base
+                result[section] = rules
+        return result
 
-    def _compile_pre_rules(self, policy: Dict[str, Any]) -> List[_CompiledRule]:
-        rules_cfg = policy.get("pre_tool_use", {}).get("rules", [])
-        compiled: List[_CompiledRule] = []
-        for item in rules_cfg:
-            rule_type = item.get("type")
-            rule_type = str(rule_type) if isinstance(rule_type, str) and rule_type else None
-            action = str(item.get("action", "allow"))
-            pattern_str = item.get("pattern")
-            pattern_str = str(pattern_str) if isinstance(pattern_str, str) and pattern_str else None
-            reason = str(item.get("reason", "未提供原因"))
-            raw_tags = item.get("tags") or []
-            tags = [str(tag) for tag in raw_tags if isinstance(tag, str)]
-            severity = str(item.get("severity")) if item.get("severity") else None
+    # _merge_policy 移除 - 使用簡單字典更新替代遞歸合併
 
-            if tags:
-                resolved_type, tag_pattern, tag_severity, resolved_tags = self._tag_matcher.build(tags, rule_type)
-                if resolved_tags:
-                    tags = resolved_tags
-                if not pattern_str and tag_pattern:
-                    pattern_str = tag_pattern
-                if severity is None and tag_severity:
-                    severity = tag_severity
-                if rule_type is None and resolved_type:
-                    rule_type = resolved_type
-
+    def _compile_rules(self, rules_config: List[Dict]) -> List[SimpleRule]:
+        """簡化的規則編譯 - 直接處理模式，無需複雜標籤解析"""
+        compiled = []
+        for rule in rules_config:
+            pattern_str = rule.get('pattern')
             if not pattern_str:
                 continue
-
+                
             try:
-                compiled_pattern = re.compile(pattern_str, re.IGNORECASE)
+                compiled.append(SimpleRule(
+                    type=rule.get('type', 'command'),
+                    action=rule.get('action', 'allow'),
+                    pattern=re.compile(pattern_str, re.IGNORECASE),
+                    reason=rule.get('reason', '無提供原因'),
+                    severity=rule.get('severity', 'medium')
+                ))
             except re.error:
+                # 忽略無效的正則表達式
                 continue
-
-            compiled.append(
-                _CompiledRule(
-                    rule_type=rule_type or "command",
-                    action=action,
-                    pattern=compiled_pattern,
-                    reason=reason,
-                    tags=list(dict.fromkeys(tags)),
-                    severity=severity,
-                )
-            )
         return compiled
