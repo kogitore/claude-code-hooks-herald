@@ -67,6 +67,15 @@ from utils.constants import SESSION_START
 from utils.session_storage import append_event_log, load_state, utc_timestamp, write_state
 
 
+# --- Function-based simple handler for dispatcher ---------------------------
+def handle_session_start(context) -> "HandlerResult":  # type: ignore[name-defined]
+    from herald import HandlerResult  # local import to avoid circulars
+    hr = HandlerResult()
+    hr.audio_type = SESSION_START
+    # No extra response fields required; dispatcher will output {"continue": true}
+    return hr
+
+
 @dataclass
 class SessionStartResult:
     context: str
