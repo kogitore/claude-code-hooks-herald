@@ -298,6 +298,74 @@ def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# --- Function-based simple handler for dispatcher ---------------------------
+def handle_post_tool_use(context) -> "HandlerResult":  # type: ignore[name-defined]
+    """Function handler mirroring PostToolUseHook behaviour in simplified form.
+
+    - Extract tool, result, duration/error fields
+    - Evaluate decision via DecisionAPI
+    - Build sanitized audit payload for additionalContext
+    - Suppress audio unless should_alert or blocked
+    """
+    from herald import HandlerResult  # local import
+
+    payload: Dict[str, Any] = context.payload if isinstance(context.payload, dict) else {}
+    api: DecisionAPI = context.decision_api or DecisionAPI()
+
+    tool = _extract_tool_name(payload)
+    result_section = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+    if not isinstance(result_section, dict):
+        result_section = {}
+
+    exit_code = _extract_exit_code(result_section)
+    success = _detect_success(result_section, exit_code)
+    duration = _extract_duration(payload)
+    error_message = _extract_error_message(result_section)
+
+    decision = api.post_tool_use_decision(tool, result_section)
+
+    should_alert = (not success) or bool(error_message) or decision.blocked
+
+    sanitized = _sanitize_result_for_output(result_section)
+    if decision.blocked:
+        sanitized.setdefault("alerts", []).append("decision_blocked")
+    if error_message:
+        sanitized.setdefault("alerts", []).append("error_detected")
+    if not success and "error_detected" not in sanitized.get("alerts", []):
+        sanitized.setdefault("alerts", []).append("execution_failed")
+
+    audit_record = {
+        "tool": tool,
+        "timestamp": _utc_timestamp(),
+        "exitCode": exit_code,
+        "duration": duration,
+        "result": sanitized,
+        "shouldAlert": should_alert,
+    }
+    if error_message:
+        audit_record["errorMessage"] = error_message
+
+    # Append audit record to decision payload and set hookSpecificOutput for compatibility
+    extra_ctx = {k: v for k, v in audit_record.items() if v is not None}
+    decision.payload["additionalContext"] = extra_ctx
+    decision.payload["hookSpecificOutput"] = {
+        "hookEventName": POST_TOOL_USE,
+        "additionalContext": json.dumps(extra_ctx, ensure_ascii=False),
+    }
+
+    # Persist audit line
+    _append_audit_record({**audit_record, "decision": "block" if decision.blocked else "allow"})
+
+    hr = HandlerResult()
+    hr.decision_payload = decision.to_dict()
+    hr.continue_value = not decision.blocked
+    if should_alert:
+        hr.audio_type = POST_TOOL_USE
+    else:
+        hr.suppress_audio = True
+    return hr
+
+
 def main() -> int:
     """CLI entry point for PostToolUse hook."""
 

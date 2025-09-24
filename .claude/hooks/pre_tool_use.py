@@ -278,6 +278,116 @@ def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# --- Function-based simple handler for dispatcher ---------------------------
+def handle_pre_tool_use(context) -> "HandlerResult":  # type: ignore[name-defined]
+    """Function handler for PreToolUse with DecisionAPI security logic.
+
+    Behaviour:
+    - Extract tool name and toolInput from context.payload
+    - Call DecisionAPI.pre_tool_use_decision(tool, tool_input)
+    - If parsing issues exist, escalate to `ask`
+    - Suppress audio on clean allow; play audio for ask/deny/block
+    - Return HandlerResult with decision_payload for dispatcher mapping
+    """
+    from herald import HandlerResult  # local import to avoid circulars
+
+    payload: Dict[str, Any] = context.payload if isinstance(context.payload, dict) else {}
+    api: DecisionAPI = context.decision_api or DecisionAPI()
+
+    # Minimal extraction mirroring class behaviour
+    issues: List[str] = []
+
+    # Tool name
+    tool = (
+        payload.get("tool")
+        or payload.get("toolName")
+        or payload.get("tool_name")
+        or payload.get("name")
+        or "unknown"
+    )
+    if not isinstance(tool, str) or not tool.strip():
+        tool = "unknown"
+        issues.append("missing_tool_name")
+
+    # Tool input
+    tool_input = None
+    raw = payload.get("toolInput") or payload.get("tool_input") or payload.get("input")
+    preview: Optional[str] = None
+    if isinstance(raw, dict):
+        tool_input = raw
+        preview = _preview_command(raw)
+    elif isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                tool_input = parsed
+                preview = _preview_command(parsed)
+            elif isinstance(parsed, list):
+                tool_input = {"args": parsed}
+                preview = _preview_command(tool_input)
+            else:
+                issues.append("unsupported_tool_input_type")
+                preview = raw[:MAX_COMMAND_PREVIEW]
+        except json.JSONDecodeError:
+            issues.append("invalid_tool_input_json")
+            preview = raw[:MAX_COMMAND_PREVIEW]
+    elif isinstance(raw, (list, tuple)):
+        tool_input = {"args": [str(x) for x in raw]}
+        preview = _preview_command(tool_input)
+    elif raw is not None:
+        issues.append("unsupported_tool_input_type")
+        preview = str(raw)[:MAX_COMMAND_PREVIEW]
+
+    # Decision evaluation
+    try:
+        decision = api.pre_tool_use_decision(tool, tool_input)
+    except Exception as exc:  # safety first
+        decision = api.ask(
+            "無法評估工具安全性，請人工確認",
+            event=PRE_TOOL_USE,
+            additional_context={"tool": tool, "error": type(exc).__name__},
+            severity="high",
+        )
+
+    # Escalate ambiguous inputs to manual review
+    if not decision.blocked and issues:
+        decision = api.ask(
+            "工具輸入格式不明確，請人工確認",
+            event=PRE_TOOL_USE,
+            additional_context={"tool": tool, "issues": issues},
+            severity=decision.severity or "medium",
+            tags=(decision.tags or []) + ["pretooluse:input-warning"],
+        )
+
+    # Build audit payload (lightweight; embedded into decision payload additionalContext)
+    extra_ctx = decision.payload.setdefault("additionalContext", {})
+    extra_ctx.setdefault("tool", tool)
+    if issues:
+        extra_ctx.setdefault("issues", issues)
+    audit = {
+        "decision": decision.payload.get("permissionDecision") or decision.payload.get("decision", "unknown"),
+        "blocked": decision.blocked,
+        "severity": decision.severity,
+        "tags": decision.tags,
+        "timestamp": _utc_timestamp(),
+    }
+    if preview:
+        audit["commandPreview"] = preview
+    decision.payload.setdefault("preToolUseAudit", audit)
+
+    # Map to HandlerResult for dispatcher
+    hr = HandlerResult()
+    hr.decision_payload = decision.to_dict()
+    hr.continue_value = not decision.blocked
+    # Audio policy: mute for clean allow
+    perm = decision.payload.get("permissionDecision")
+    if perm == "allow" and not decision.blocked:
+        hr.suppress_audio = True
+    else:
+        hr.audio_type = PRE_TOOL_USE
+    return hr
+
+
 def main() -> int:
     """CLI entry point for PreToolUse hook."""
 

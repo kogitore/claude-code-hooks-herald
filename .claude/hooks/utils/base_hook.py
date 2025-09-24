@@ -4,7 +4,7 @@ Temporary simplified BaseHook - compatibility shim during Phase 1 cleanup.
 Goal: keep existing hooks running while audio/middleware layers are removed.
 Important: this BaseHook does NOT play audio; dispatcher is responsible.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 import json
 from pathlib import Path
@@ -14,10 +14,10 @@ from pathlib import Path
 class HookExecutionResult:
     """Simple result class for hook execution"""
     # Execution payload for JSON response (hooks often clear this)
-    payload: Dict[str, Any] = None  # type: ignore[assignment]
+    payload: Dict[str, Any] = field(default_factory=dict)
     # Notes/errors for debug logging
-    notes: List[str] = None  # type: ignore[assignment]
-    errors: List[str] = None  # type: ignore[assignment]
+    notes: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
 
     # Audio-related fields (dispatcher will fill these later)
     audio_played: bool = False
@@ -45,23 +45,43 @@ class BaseHook:
         self.default_audio_event = None
         self.default_throttle_seconds = 0
     
-    def execute(self, payload: Dict[str, Any], enable_audio: bool = True, **_: Any) -> HookExecutionResult:
-        """Execute the hook logic and return meta for dispatcher-driven audio."""
-        # Process hook-specific logic (usually returns {})
-        payload = payload or {}
-        processed = self.process(payload)
+    def execute(self, payload: Dict[str, Any], enable_audio: bool = True, **kwargs: Any) -> HookExecutionResult:
+        """Execute the hook logic and return meta for dispatcher-driven audio.
 
-        # Prepare result; do NOT play audio here (dispatcher owns playback)
-        result = HookExecutionResult(
-            payload=dict(processed) if isinstance(processed, dict) else {},
-            notes=[],
-            errors=[],
+        Compatibility behaviour:
+        - If subclass implements handle_hook_logic, use it to build HookExecutionResult
+        - Otherwise, call process() and return empty payload
+        - Do NOT actually play audio; only attach audio metadata
+        """
+        payload = payload or {}
+
+        result: HookExecutionResult
+        if hasattr(self, "handle_hook_logic"):
+            try:
+                # parsed_args is commonly used; pass through when available
+                parsed_args = kwargs.get("parsed_args")
+                result = getattr(self, "handle_hook_logic")(payload, parsed_args=parsed_args)
+                if not isinstance(result, HookExecutionResult):
+                    # Fallback to empty result if subclass returned wrong type
+                    result = HookExecutionResult(payload={})
+            except Exception as exc:  # delegate to subclass error handler if present
+                if hasattr(self, "handle_error"):
+                    processed = getattr(self, "handle_error")(exc)
+                    result = HookExecutionResult(payload=processed or {})
+                else:
+                    result = HookExecutionResult(payload={})
+        else:
+            processed = self.process(payload)
+            result = HookExecutionResult(payload=dict(processed) if isinstance(processed, dict) else {})
+
+        # Attach audio metadata for dispatcher (no playback here)
+        self._attach_audio(
+            result,
+            self.default_audio_event,
+            enable_audio=bool(enable_audio),
+            throttle_key=self._default_throttle_key(self.default_audio_event or "default", result) if self.default_throttle_seconds else None,
+            throttle_seconds=int(self.default_throttle_seconds) if self.default_throttle_seconds else None,
         )
-        # Provide defaults used by dispatcher
-        result.audio_type = self.default_audio_event
-        if self.default_throttle_seconds > 0:
-            result.throttle_window = int(self.default_throttle_seconds)
-            result.throttle_key = self._default_throttle_key(result.audio_type or "default", result)
         return result
     
     def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -74,6 +94,24 @@ class BaseHook:
     # Compatibility: allow hooks to customize throttle key
     def _default_throttle_key(self, audio_event: str, result: HookExecutionResult) -> str:  # noqa: ARG002
         return f"{audio_event}:default"
+
+    # Attach audio metadata only; dispatcher will actually play audio
+    def _attach_audio(
+        self,
+        result: HookExecutionResult,
+        audio_event: Optional[str],
+        *,
+        enable_audio: bool,
+        throttle_key: Optional[str],
+        throttle_seconds: Optional[int],
+    ) -> None:
+        if not audio_event:
+            return
+        result.audio_type = audio_event
+        if throttle_seconds and throttle_seconds > 0:
+            result.throttle_window = int(throttle_seconds)
+        if throttle_key:
+            result.throttle_key = throttle_key
 
     # Minimal compatibility output helper used by some hook CLIs
     def emit_json(self, result: HookExecutionResult) -> None:

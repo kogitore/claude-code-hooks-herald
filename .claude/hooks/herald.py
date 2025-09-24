@@ -27,12 +27,12 @@ from utils.audio_manager import AudioManager
 from utils.common_io import generate_audio_notes, parse_stdin
 from utils.decision_api import DecisionAPI
 from notification import handle_notification
-from post_tool_use import PostToolUseHook
-from pre_tool_use import PreToolUseHook
+from post_tool_use import PostToolUseHook, handle_post_tool_use
+from pre_tool_use import PreToolUseHook, handle_pre_tool_use
 from session_end import handle_session_end, SessionEndHook
 from session_start import handle_session_start, SessionStartHook
 from stop import handle_stop
-from user_prompt_submit import UserPromptSubmitHook
+from user_prompt_submit import UserPromptSubmitHook, handle_user_prompt_submit
 
 
 # ---------------------------------------------------------------------------
@@ -334,17 +334,11 @@ def build_default_dispatcher(
     dispatcher = HeraldDispatcher(audio_manager=audio_manager, decision_api=decision_api)
 
     # Function-based simple handlers
-    pre_tool_use_hook = PreToolUseHook(
-        audio_manager=dispatcher.audio_manager,
-        decision_api=dispatcher.decision_api,
-    )
-    post_tool_use_hook = PostToolUseHook(
-        audio_manager=dispatcher.audio_manager,
-        decision_api=dispatcher.decision_api,
-    )
-    session_start_hook = SessionStartHook(audio_manager=dispatcher.audio_manager)
-    session_end_hook = SessionEndHook(audio_manager=dispatcher.audio_manager)
-    user_prompt_hook = UserPromptSubmitHook(audio_manager=dispatcher.audio_manager)
+    pre_tool_use_hook = handle_pre_tool_use
+    post_tool_use_hook = handle_post_tool_use
+    session_start_hook = handle_session_start
+    session_end_hook = handle_session_end
+    user_prompt_hook = handle_user_prompt_submit
 
     def _decision_api_for(context: DispatchContext) -> DecisionAPI:
         return context.decision_api or dispatcher.decision_api
@@ -406,11 +400,11 @@ def build_default_dispatcher(
     dispatcher.register_handler(constants.NOTIFICATION, _hook_handler(constants.NOTIFICATION, handle_notification), audio_type=constants.NOTIFICATION)
     dispatcher.register_handler(constants.STOP, _hook_handler(constants.STOP, handle_stop), audio_type=constants.STOP)
     dispatcher.register_handler(constants.SUBAGENT_STOP, _hook_handler(constants.SUBAGENT_STOP, handle_stop), audio_type=constants.SUBAGENT_STOP)
-    dispatcher.register_handler(constants.PRE_TOOL_USE, _hook_handler(constants.PRE_TOOL_USE, pre_tool_use_hook), audio_type=constants.PRE_TOOL_USE, throttle_window=pre_tool_use_hook.default_throttle_seconds)
-    dispatcher.register_handler(constants.POST_TOOL_USE, _hook_handler(constants.POST_TOOL_USE, post_tool_use_hook), audio_type=constants.POST_TOOL_USE, throttle_window=post_tool_use_hook.default_throttle_seconds)
+    dispatcher.register_handler(constants.PRE_TOOL_USE, _hook_handler(constants.PRE_TOOL_USE, pre_tool_use_hook), audio_type=constants.PRE_TOOL_USE)
+    dispatcher.register_handler(constants.POST_TOOL_USE, _hook_handler(constants.POST_TOOL_USE, post_tool_use_hook), audio_type=constants.POST_TOOL_USE)
     dispatcher.register_handler(constants.SESSION_START, _hook_handler(constants.SESSION_START, handle_session_start), audio_type=constants.SESSION_START)
     dispatcher.register_handler(constants.SESSION_END, _hook_handler(constants.SESSION_END, handle_session_end), audio_type=constants.SESSION_END)
-    dispatcher.register_handler(constants.USER_PROMPT_SUBMIT, _hook_handler(constants.USER_PROMPT_SUBMIT, user_prompt_hook), audio_type=constants.USER_PROMPT_SUBMIT, throttle_window=user_prompt_hook.default_throttle_seconds)
+    dispatcher.register_handler(constants.USER_PROMPT_SUBMIT, _hook_handler(constants.USER_PROMPT_SUBMIT, user_prompt_hook), audio_type=constants.USER_PROMPT_SUBMIT)
 
     def _noop_handler(_: DispatchContext) -> HandlerResult:
         hr = HandlerResult()

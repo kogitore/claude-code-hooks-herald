@@ -34,9 +34,10 @@ def load_state() -> Dict[str, Any]:
 def write_state(state: Dict[str, Any]) -> None:
     try:
         STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(STATE_PATH, "w", encoding="utf-8") as f:
-            json.dump(state, f)
+        # Use Path.write_text to align with tests that patch this method
+        STATE_PATH.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
     except Exception:
+        # Swallow permission or IO errors per test expectations
         pass
 
 

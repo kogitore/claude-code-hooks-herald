@@ -306,6 +306,97 @@ def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# --- Function-based simple handler for dispatcher ---------------------------
+def handle_user_prompt_submit(context) -> "HandlerResult":  # type: ignore[name-defined]
+    from herald import HandlerResult  # local import to avoid circulars
+
+    payload: Dict[str, Any] = context.payload if isinstance(context.payload, dict) else {}
+
+    # Reuse internal helpers to mirror class behaviour
+    prompt, issues = _extract_prompt(payload)
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    user_id = payload.get("user_id") or payload.get("userId")
+    session_id = payload.get("session_id") or payload.get("sessionId")
+    timestamp = payload.get("timestamp") if isinstance(payload.get("timestamp"), str) else _utc_timestamp()
+
+    rate_issue = _check_rate_limit(user_id, session_id)
+    if rate_issue:
+        issues += (rate_issue,)
+
+    suspicious = _scan_prompt(prompt)
+    issues += suspicious
+
+    truncated = False
+    sanitized_prompt = prompt.strip()
+    if len(sanitized_prompt) > MAX_PROMPT_LENGTH:
+        sanitized_prompt = sanitized_prompt[:MAX_PROMPT_LENGTH]
+        truncated = True
+        issues += ("prompt_truncated",)
+
+    should_alert = bool(issues)
+
+    payload_out = {
+        "userPrompt": {
+            "prompt": sanitized_prompt,
+            "truncated": truncated,
+            "length": len(sanitized_prompt),
+            "timestamp": timestamp,
+        }
+    }
+    if user_id:
+        payload_out["userPrompt"]["userId"] = str(user_id)
+    if session_id:
+        payload_out["userPrompt"]["sessionId"] = str(session_id)
+    if metadata:
+        payload_out["userPrompt"]["metadata"] = metadata
+    if issues:
+        payload_out["userPrompt"]["issues"] = list(dict.fromkeys(issues))
+    if should_alert:
+        payload_out["userPrompt"]["requiresAttention"] = True
+
+    preview = sanitized_prompt[:MAX_PREVIEW] if sanitized_prompt else None
+    _record_submission(
+        {
+            "timestamp": timestamp,
+            "userId": user_id,
+            "sessionId": session_id,
+            "length": len(sanitized_prompt),
+            "issues": list(dict.fromkeys(issues)),
+        }
+    )
+
+    context_payload = {
+        "promptPreview": preview,
+        "issues": list(dict.fromkeys(issues)),
+        "timestamp": _utc_timestamp(),
+    }
+    context_payload.update({k: v for k, v in payload_out.get("userPrompt", {}).items() if k not in {"issues", "requiresAttention"}})
+
+    hr = HandlerResult()
+    # Map to Claude schema via decision_payload and include hookSpecificOutput for compatibility
+    hr.decision_payload = {
+        "additionalContext": context_payload,
+        "hookSpecificOutput": {
+            "hookEventName": USER_PROMPT_SUBMIT,
+            "additionalContext": json.dumps(context_payload, ensure_ascii=False),
+        },
+    }
+    # Signal block when issues present
+    if issues:
+        hr.decision_payload["decision"] = "block"
+        hr.decision_payload["reason"] = "Issues detected: " + ", ".join(i.replace("_", " ") for i in issues)
+        hr.continue_value = False
+    else:
+        hr.continue_value = True
+
+    # Audio only on alert
+    if should_alert:
+        hr.audio_type = USER_PROMPT_SUBMIT
+    else:
+        hr.suppress_audio = True
+    return hr
+
+
 def main() -> int:
     """CLI entry point for UserPromptSubmit hook."""
 
