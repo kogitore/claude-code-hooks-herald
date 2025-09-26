@@ -12,13 +12,20 @@ import json
 import sys
 from typing import Dict, Optional
 
-from utils.common_io import parse_stdin
+# Simple stdin parser (was utils.common_io)
+def parse_stdin():
+    import json, sys
+    try:
+        raw = sys.stdin.read().strip()
+        return json.loads(raw) if raw else {}, None
+    except Exception:
+        return {}, None
+from utils.handler_result import HandlerResult
 from utils.constants import NOTIFICATION
 
 
 # Dispatcher-facing handler
 def handle_notification(context) -> "HandlerResult":  # type: ignore[name-defined]
-    from herald import HandlerResult  # local import to avoid circulars
     hr = HandlerResult()
     hr.audio_type = NOTIFICATION
     # throttle window will be resolved by dispatcher defaults/config

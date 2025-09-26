@@ -20,10 +20,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from utils.constants import SESSION_END
 from utils.session_storage import load_state, write_state, append_event_log
+from utils.handler_result import HandlerResult
 
 
 def handle_session_end(context) -> "HandlerResult":  # type: ignore[name-defined]
-    from herald import HandlerResult
     hr = HandlerResult()
     hr.audio_type = SESSION_END
     try:
@@ -159,10 +159,9 @@ def main() -> int:  # pragma: no cover
         payload = json.loads(raw)
     except Exception:
         payload = {}
-    from herald import build_default_dispatcher
-    disp = build_default_dispatcher()
-    report = disp.dispatch(SESSION_END, payload=payload)
-    print(json.dumps(report.response))
+    from mini_dispatcher import dispatch as mini_dispatch
+    response = mini_dispatch(SESSION_END, payload=payload, enable_audio=False)
+    print(json.dumps(response))
     return 0
 
 

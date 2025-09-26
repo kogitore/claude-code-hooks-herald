@@ -12,7 +12,7 @@ MODULE_ROOT = REPO_ROOT / ".claude" / "hooks"
 if str(MODULE_ROOT) not in sys.path:
     sys.path.insert(0, str(MODULE_ROOT))
 
-from herald import build_default_dispatcher
+from herald import HANDLERS
 from utils import constants
 
 

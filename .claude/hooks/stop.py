@@ -6,13 +6,20 @@ import argparse
 import json
 import sys
 
-from utils.common_io import parse_stdin
+# Simple stdin parser (was utils.common_io)
+def parse_stdin():
+    import json, sys
+    try:
+        raw = sys.stdin.read().strip()
+        return json.loads(raw) if raw else {}, None
+    except Exception:
+        return {}, None
 from utils.constants import STOP
+from utils.handler_result import HandlerResult
 
 
 def handle_stop(context) -> "HandlerResult":  # type: ignore[name-defined]
     """Handle both Stop and SubagentStop events with same logic"""
-    from herald import HandlerResult  # local import to avoid circulars
     hr = HandlerResult()
     hr.audio_type = context.event_type  # Use event_type to handle both Stop/SubagentStop
     return hr

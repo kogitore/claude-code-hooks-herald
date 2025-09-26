@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from utils.constants import POST_TOOL_USE
 from utils.decision_api import DecisionAPI
+from utils.handler_result import HandlerResult
 
 
 MAX_OUTPUT_SNIPPET = 600
@@ -90,7 +91,6 @@ def _append_audit(record: Dict[str, Any]) -> None:
 
 
 def handle_post_tool_use(context) -> "HandlerResult":  # type: ignore[name-defined]
-    from herald import HandlerResult
 
     payload: Dict[str, Any] = context.payload if isinstance(context.payload, dict) else {}
     api: DecisionAPI = context.decision_api or DecisionAPI()
@@ -146,9 +146,9 @@ def main() -> int:  # pragma: no cover
         payload = json.loads(sys.stdin.read().strip() or "{}")
     except Exception:
         payload = {}
-    from herald import build_default_dispatcher
-    report = build_default_dispatcher().dispatch(POST_TOOL_USE, payload=payload)
-    print(json.dumps(report.response))
+    from mini_dispatcher import dispatch as mini_dispatch
+    response = mini_dispatch(POST_TOOL_USE, payload=payload, enable_audio=False)
+    print(json.dumps(response))
     return 0
 
 

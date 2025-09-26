@@ -23,11 +23,83 @@ Herald 為 Claude Code 提供單一入口的掛鉤系統：所有官方事件都
 
 ## 快速開始
 
-最精簡的啟用步驟如下：
+### 系統需求
 
-1. **放入音效檔**：把 `.wav` 檔案放進 `.claude/sounds/`。
-2. **確認設定**：`.claude/settings.json` 已預設將所有事件指向 `herald.py`。若複製到其他專案，請確保該檔案同步更新。
-3. **觸發事件**：Claude Code 會自動呼叫 Herald；也可使用 CLI 測試。
+**基本需求：**
+- **Claude Code CLI** - [安裝 Claude Code](https://claude.ai/code) (本 hooks 系統與 Claude Code 整合)
+- **Python 3.9+** (已測試 Python 3.11-3.13)
+- **uv** (超快速 Python 套件管理器) - [安裝 uv](https://docs.astral.sh/uv/getting-started/installation/)
+- **Git** (用於複製儲存庫)
+- **音效系統：**
+  - **macOS:** `afplay` (內建)
+  - **Linux:** `ffplay` (ffmpeg 套件) 或 `aplay` (alsa-utils)
+  - **Windows:** `winsound` (Python 內建)
+
+**安裝 uv (如尚未安裝)：**
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# 替代方案: pipx install uv
+```
+
+### 設置步驟
+
+1. **複製並進入目錄：**
+   ```bash
+   git clone <repository-url>
+   cd claude-code-hooks-herald
+   ```
+
+2. **放入音效檔：** 將 `.wav` 檔案放進 `.claude/sounds/`：
+   ```bash
+   # 必要的音效檔案：
+   # - task_complete.wav (Stop 事件用)
+   # - agent_complete.wav (SubagentStop 事件用)
+   # - user_prompt.wav (Notification 事件用)
+   ```
+
+3. **確認設定：** `.claude/settings.json` 已預設將所有事件導向 `herald.py`。複製到你的 Claude 專案：
+   ```bash
+   cp .claude/settings.json /path/to/your/claude/project/.claude/
+   ```
+
+4. **設定執行權限：**
+   ```bash
+   chmod +x .claude/hooks/*.py
+   ```
+
+5. **測試安裝：**
+   ```bash
+   # 測試 herald 系統
+   echo '{"message": "test"}' | uv run .claude/hooks/herald.py --hook Notification --enable-audio
+
+   # 測試安全政策
+   echo '{"tool": "bash", "toolInput": {"command": "rm -rf /"}}' | uv run .claude/hooks/herald.py --hook PreToolUse
+   ```
+
+### 驗證
+
+**預期輸出：**
+- Notification 測試: `{"continue": true}` + 音效播放
+- 安全測試: `{"continue": false, "permissionDecision": "deny"}` (危險指令被阻擋)
+
+**疑難排解：**
+- **無音效：**
+  - 檢查 `.claude/sounds/` 目錄存在且有 `.wav` 檔案
+  - Linux: 安裝音效相依性: `sudo apt-get install ffmpeg` 或 `sudo apt-get install alsa-utils`
+- **權限錯誤：** 執行 `chmod +x .claude/hooks/*.py`
+- **Python/uv 找不到：** 確保兩者都在你的 `$PATH` 中
+- **Claude Code 偵測不到 hooks：** 驗證 `.claude/settings.json` 在專案根目錄
+- **"找不到模組" 錯誤：** 從儲存庫根目錄執行
+
+**平台特定注意事項：**
+- **Windows：** 某些防毒軟體可能標記 Python 腳本 - 將專案目錄加入排除清單
+- **Linux/WSL：** 確保音效驅動程式正確配置以進行音效播放
+- **macOS：** 如有提示，請授予 Terminal/Claude Code 麥克風/音效權限
 
 ## 設定
 

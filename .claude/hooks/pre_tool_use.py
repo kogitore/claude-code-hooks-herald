@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from utils.decision_api import DecisionAPI
 from utils.constants import PRE_TOOL_USE
+from utils.handler_result import HandlerResult
 
 
 MAX_COMMAND_PREVIEW = 240
@@ -35,7 +36,6 @@ def _utc_timestamp() -> str:
 
 
 def handle_pre_tool_use(context) -> "HandlerResult":  # type: ignore[name-defined]
-    from herald import HandlerResult  # local import to avoid circulars
 
     payload: Dict[str, Any] = context.payload if isinstance(context.payload, dict) else {}
     api: DecisionAPI = context.decision_api or DecisionAPI()
@@ -127,9 +127,10 @@ def main() -> int:  # pragma: no cover
         payload = json.loads(sys.stdin.read().strip() or "{}")
     except Exception:
         payload = {}
-    from herald import build_default_dispatcher
-    report = build_default_dispatcher().dispatch(PRE_TOOL_USE, payload=payload)
-    print(json.dumps(report.response))
+    # Use herald dispatcher for consistency
+    from herald import dispatch
+    response = dispatch(PRE_TOOL_USE, payload, enable_audio=False)
+    print(json.dumps(response))
     return 0
 
 

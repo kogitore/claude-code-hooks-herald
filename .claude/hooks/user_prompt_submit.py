@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from utils.constants import USER_PROMPT_SUBMIT
+from utils.handler_result import HandlerResult
 
 
 PROMPT_LOG_PATH = Path(__file__).resolve().parents[2] / "logs" / "prompt_submissions.jsonl"
@@ -160,7 +161,6 @@ def _utc_timestamp() -> str:
 
 # --- Function-based simple handler for dispatcher ---------------------------
 def handle_user_prompt_submit(context) -> "HandlerResult":  # type: ignore[name-defined]
-    from herald import HandlerResult
     payload: Dict[str, Any] = context.payload if isinstance(context.payload, dict) else {}
     processed_payload, issues, preview, should_alert = _process_prompt(payload)
     base = processed_payload.get("userPrompt", {})
@@ -194,10 +194,9 @@ def main() -> int:  # pragma: no cover
         payload = json.loads(raw)
     except Exception:
         payload = {}
-    from herald import build_default_dispatcher
-    disp = build_default_dispatcher()
-    report = disp.dispatch(USER_PROMPT_SUBMIT, payload=payload)
-    print(json.dumps(report.response))
+    from mini_dispatcher import dispatch as mini_dispatch
+    response = mini_dispatch(USER_PROMPT_SUBMIT, payload=payload, enable_audio=False)
+    print(json.dumps(response))
     return 0
 
 

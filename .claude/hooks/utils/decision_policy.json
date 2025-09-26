@@ -3,6 +3,13 @@
     "rules": [
       {
         "action": "deny",
+        "pattern": "rm\\s+-rf\\s+/",
+        "reason": "危險命令：刪除根目錄",
+        "tags": ["system:dangerous"],
+        "severity": "critical"
+      },
+      {
+        "action": "deny",
         "pattern": "rm\\s+-rf\\s+\\.claude",
         "reason": "禁止刪除專案內部設定",
         "tags": ["system:dangerous"],

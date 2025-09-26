@@ -23,11 +23,83 @@ Unified dispatcher + audio-only hook system for Claude Code. Herald routes every
 
 ## Quick Start
 
-This project requires no complex installation. The minimal steps to get started are:
+### Prerequisites
 
-1. **Provide sound files:** Place `.wav` files in `.claude/sounds/`.
-2. **Confirm settings:** `.claude/settings.json` is already wired to run `herald.py` for every event. Copy it into your Claude project if necessary.
-3. **Run hooks:** Claude Code will invoke Herald automatically; you can also test manually (see CLI section).
+**System Requirements:**
+- **Claude Code CLI** - [Install Claude Code](https://claude.ai/code) (this hooks system integrates with Claude Code)
+- **Python 3.9+** (tested on Python 3.11-3.13)
+- **uv** (ultra-fast Python package manager) - [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
+- **Git** (for cloning repository)
+- **Audio System:**
+  - **macOS:** `afplay` (built-in)
+  - **Linux:** `ffplay` (ffmpeg package) or `aplay` (alsa-utils)
+  - **Windows:** `winsound` (built-in with Python)
+
+**Install uv (if not already installed):**
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Alternative: pipx install uv
+```
+
+### Setup Steps
+
+1. **Clone and navigate:**
+   ```bash
+   git clone <repository-url>
+   cd claude-code-hooks-herald
+   ```
+
+2. **Provide sound files:** Place `.wav` files in `.claude/sounds/`:
+   ```bash
+   # Required audio files:
+   # - task_complete.wav (for Stop events)
+   # - agent_complete.wav (for SubagentStop events)
+   # - user_prompt.wav (for Notifications)
+   ```
+
+3. **Confirm settings:** `.claude/settings.json` is pre-configured to route all events through `herald.py`. Copy to your Claude project:
+   ```bash
+   cp .claude/settings.json /path/to/your/claude/project/.claude/
+   ```
+
+4. **Set executable permissions:**
+   ```bash
+   chmod +x .claude/hooks/*.py
+   ```
+
+5. **Test installation:**
+   ```bash
+   # Test herald system
+   echo '{"message": "test"}' | uv run .claude/hooks/herald.py --hook Notification --enable-audio
+
+   # Test security policy
+   echo '{"tool": "bash", "toolInput": {"command": "rm -rf /"}}' | uv run .claude/hooks/herald.py --hook PreToolUse
+   ```
+
+### Verification
+
+**Expected outputs:**
+- Notification test: `{"continue": true}` + audio playback
+- Security test: `{"continue": false, "permissionDecision": "deny"}` (dangerous command blocked)
+
+**Troubleshooting:**
+- **No audio:**
+  - Check `.claude/sounds/` directory exists with `.wav` files
+  - Linux: Install audio dependencies: `sudo apt-get install ffmpeg` or `sudo apt-get install alsa-utils`
+- **Permission errors:** Run `chmod +x .claude/hooks/*.py`
+- **Python/uv not found:** Ensure both are in your `$PATH`
+- **Claude Code not detecting hooks:** Verify `.claude/settings.json` is in your project root
+- **"Module not found" errors:** Run from the repository root directory
+
+**Platform-specific Notes:**
+- **Windows:** Some antivirus software may flag Python scripts - add project directory to exclusions
+- **Linux/WSL:** Ensure audio drivers are properly configured for sound playback
+- **macOS:** Grant Terminal/Claude Code microphone/audio permissions if prompted
 
 ## Configuration
 

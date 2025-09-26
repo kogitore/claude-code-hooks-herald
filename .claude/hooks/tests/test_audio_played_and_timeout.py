@@ -1,6 +1,7 @@
-# Removed per TESTS_CLEANUP_GUIDE Phase 1
 #!/usr/bin/env python3
 from __future__ import annotations
+
+# Removed per TESTS_CLEANUP_GUIDE Phase 1
 import json
 import time
 from common_test_utils import run_hook

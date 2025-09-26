@@ -14,3 +14,7 @@
 {"sessionId": "unknown-session", "event": "session_start", "timestamp": "2025-09-24T11:57:45Z", "checks": ["sounds_directory_present", "audio_player_detected"], "warnings": []}
 {"sessionId": "unknown-session", "event": "session_end", "timestamp": "2025-09-24T11:58:15Z", "termination": "normal", "removed": [], "skipped": []}
 {"sessionId": "0131a5eb-329c-47c6-9618-74cbfdee7fe3", "event": "session_start", "timestamp": "2025-09-24T12:08:49Z", "checks": ["sounds_directory_present", "audio_player_detected"], "warnings": []}
+{"sessionId": "0131a5eb-329c-47c6-9618-74cbfdee7fe3", "event": "session_end", "timestamp": "2025-09-24T15:58:22Z", "termination": "clear", "removed": [], "skipped": []}
+{"sessionId": "482650ea-ac15-4715-965d-9438515a4b5b", "event": "session_start", "timestamp": "2025-09-24T15:58:22Z", "checks": ["sounds_directory_present", "audio_player_detected"], "warnings": []}
+{"sessionId": "532420e5-5238-4a28-9ebb-0a367c8bea12", "event": "session_start", "timestamp": "2025-09-25T23:53:47Z", "checks": ["sounds_directory_present"], "warnings": []}
+{"sessionId": "2a6c9eec-173a-4b2a-8775-ecf45f7c9ceb", "event": "session_start", "timestamp": "2025-09-26T05:27:57Z", "checks": ["sounds_directory_present"], "warnings": []}
