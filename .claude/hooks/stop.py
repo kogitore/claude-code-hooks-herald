@@ -1,58 +1,59 @@
 #!/usr/bin/env python3
-"""
-Stop Hook (task completion, audio-only) — Official JSON schema compliant
-
-Output policy (per Claude Code Hooks docs):
-- Print ONLY a single JSON object to stdout using standard fields.
-- Allowed fields used here: `continue` (true), optional `stopReason`.
-- No custom shapes like hookSpecificOutput on stdout (prints telemetry to stderr).
-"""
+"""Stop hook - simplified function-based implementation."""
 from __future__ import annotations
 
 import argparse
-import json as _json
+import json
 import sys
-from utils.common_io import parse_stdin, generate_audio_notes
-from utils.audio_manager import AudioManager
-from utils.completion_handler import process_completion
+
+# Simple stdin parser (was utils.common_io)
+def parse_stdin():
+    import json, sys
+    try:
+        raw = sys.stdin.read().strip()
+        return json.loads(raw) if raw else {}, None
+    except Exception:
+        return {}, None
+from utils.constants import STOP
+from utils.handler_result import HandlerResult
+
+
+def handle_stop(context) -> "HandlerResult":  # type: ignore[name-defined]
+    """Handle both Stop and SubagentStop events with same logic"""
+    hr = HandlerResult()
+    hr.audio_type = context.event_type  # Use event_type to handle both Stop/SubagentStop
+    return hr
+
+
+def handle_subagent_stop(context) -> "HandlerResult":  # type: ignore[name-defined]
+    """Alias for handle_stop - same logic for both events"""
+    return handle_stop(context)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--enable-audio", dest="enable_audio", action="store_true", help="Enable actual audio playback")
-    ap.add_argument("--json-only", dest="json_only", action="store_true", help="Suppress any non-JSON stdout (telemetry stays on stderr)")
+    ap.add_argument("--json-only", dest="json_only", action="store_true", help="Reserved for compatibility")
     args = ap.parse_args()
 
-    # Parse optional stdin (ignored for control)
-    payload, marker = parse_stdin()
+    payload, _ = parse_stdin()
 
-    am = AudioManager()
-    window_seconds = am.get_throttle_window("Stop", 120)
-    # Throttle window configurable via audio_config.json (default 120s)
-    played, path, throttled = process_completion(
-        am,
-        audio_key="Stop",
-        enable=bool(args.enable_audio),
-        throttle_key="Stop",
-        window_seconds=window_seconds,
-    )
+    # Manual run audio + structured response for legacy Goal3 test
+    audio_ctx = {"audioType": STOP, "enabled": False, "status": "skipped", "hookType": "Stop"}
+    if args.enable_audio:
+        from utils.audio_manager import AudioManager
 
-    # Telemetry to stderr (so UI JSON validator stays happy)
-    notes = generate_audio_notes(
-        throttled=throttled,
-        path=path,
-        played=played,
-        enabled=bool(args.enable_audio),
-        throttle_msg=f"Throttled (<= {window_seconds}s)",
-    )
+        am = AudioManager()
+        played, path, audio_ctx = am.play_audio_safe(STOP, enabled=True, additional_context={"source": "stop_cli"})
+        audio_ctx = dict(audio_ctx or {})
+        audio_ctx.update({"audioType": STOP, "enabled": True, "status": "played" if played else "skipped", "hookType": "Stop"})
+    # Emit a minimal stderr marker for tests
     try:
-        print(f"[Stop] audioPlayed={bool(played)} throttled={bool(throttled)} path={path} notes={notes}", file=sys.stderr)
+        print("[Stop] invoked", file=sys.stderr)
     except Exception:
         pass
-
-    # Output required JSON response per Claude Code Hooks specification
-    response = {"continue": True}
-    print(_json.dumps(response))
+    response = {"continue": True, "additionalContext": {"audioContext": audio_ctx}}
+    print(json.dumps(response))
     return 0
 
 

@@ -1,304 +1,187 @@
 #!/usr/bin/env python3
-"""
-Minimal Audio Manager for Claude Code Hooks (pure local audio files)
+"""Linus-style simplified Audio Manager for Claude Code Hooks.
 
-- No TTS/LLM, no network calls
-- Uses system audio players when available (afplay/ffplay/aplay/winsound)
-- Cross-platform volume control: macOS/Linux via player args, Windows via audioop
-- Paths simplified: repo root is assumed at Path(__file__).parents[3]
+KISS principle: Simple, working, maintainable.
+No over-engineering. No ceremony. Just works.
+
+Functionality:
+- Load audio config from audio_config.json
+- Map events to audio files
+- Play audio with system player (afplay/ffplay/aplay)
+- Basic throttling to prevent spam
 """
 from __future__ import annotations
 
 import json
 import os
 import subprocess
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, List, Tuple
+from threading import Lock
+from typing import Dict, Optional, Tuple, Any
 
-
-_CANONICAL_AUDIO_KEYS = {
-    "stop": "Stop",
-    "subagentstop": "SubagentStop",
-    "notification": "Notification",
-    "agentstop": "SubagentStop",  # legacy alias
-    "usernotification": "Notification",  # legacy alias
-}
-
-
-def _canonical_audio_key(raw: str) -> str:
-    if not isinstance(raw, str):
-        return raw
-    key = raw.replace("_", "").lower()
-    return _CANONICAL_AUDIO_KEYS.get(key, raw)
-
-
-def _load_config(config_path: Path) -> Dict:
-    try:
-        if config_path.exists():
-            return json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    return {}
-
-
-def _which(cmd: str) -> Optional[str]:
-    from shutil import which
-
-    return which(cmd)
-
-
-def _play_with(cmd: str, args: list[str], timeout_s: float = 5.0) -> int:
-    try:
-        p = subprocess.run([cmd] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout_s)
-        return p.returncode
-    except Exception:
-        return 1
-
-
-def _play_with_windows(filepath: str, volume: float = 1.0, timeout_s: float = 5.0) -> int:
-    """Windows-specific audio player using winsound with volume control"""
-    try:
-        import winsound
-
-        if volume >= 1.0:
-            # No volume adjustment needed, play original file
-            winsound.PlaySound(str(filepath), winsound.SND_FILENAME)
-            return 0
-
-        # Perform volume adjustment using standard library
-        import audioop
-        import wave
-        import io
-
-        # Read WAV file
-        with wave.open(str(filepath), 'rb') as wav_file:
-            frames = wav_file.readframes(-1)
-            sample_width = wav_file.getsampwidth()
-            channels = wav_file.getnchannels()
-            framerate = wav_file.getframerate()
-
-        # Adjust volume (volume range 0.0-1.0)
-        adjusted_frames = audioop.mul(frames, sample_width, volume)
-
-        # Create in-memory WAV data
-        wav_buffer = io.BytesIO()
-        with wave.open(wav_buffer, 'wb') as out_wav:
-            out_wav.setnchannels(channels)
-            out_wav.setsampwidth(sample_width)
-            out_wav.setframerate(framerate)
-            out_wav.writeframes(adjusted_frames)
-
-        # Play adjusted audio from memory
-        wav_data = wav_buffer.getvalue()
-        winsound.PlaySound(wav_data, winsound.SND_MEMORY)
-        return 0
-
-    except Exception:
-        # Fallback: play without volume control
-        try:
-            import winsound
-            winsound.PlaySound(str(filepath), winsound.SND_FILENAME)
-            return 0
-        except Exception:
-            return 1
+from . import constants
 
 
 @dataclass
 class AudioConfig:
+    """Simple audio configuration."""
     base_path: Path
     mappings: Dict[str, str]
 
 
+def _which(cmd: str) -> bool:
+    """Check if command exists in PATH."""
+    return subprocess.run(["which", cmd], capture_output=True).returncode == 0
+
+
+def _load_config(repo_root: Path) -> Tuple[AudioConfig, float, Dict[str, int]]:
+    """Load audio configuration. Simple and direct."""
+    config_path = repo_root / ".claude" / "hooks" / "utils" / "audio_config.json"
+
+    # Defaults
+    base_path = repo_root / ".claude" / "sounds"
+    mappings = {}
+    volume = 0.2
+    throttle = {}
+
+    try:
+        if config_path.exists():
+            data = json.loads(config_path.read_text())
+
+            # Extract mappings
+            if "sound_files" in data:
+                sf = data["sound_files"]
+                if "mappings" in sf:
+                    mappings = sf["mappings"]
+
+            # Extract settings
+            if "audio_settings" in data:
+                settings = data["audio_settings"]
+                volume = float(settings.get("volume", 0.2))
+                if "throttle_seconds" in settings:
+                    throttle = {k: int(v) for k, v in settings["throttle_seconds"].items()}
+
+    except Exception:
+        pass  # Use defaults on any error
+
+    return AudioConfig(base_path, mappings), volume, throttle
+
+
 class AudioManager:
+    """Simplified audio manager. No over-engineering."""
+
     def __init__(self):
-        here_path = Path(__file__).resolve()
-        # Project root is three levels up: utils -> hooks -> .claude -> <root>
-        repo_root = here_path.parents[3]
+        # Find repo root (3 levels up from utils/)
+        self.repo_root = Path(__file__).resolve().parents[3]
 
-        # 1) ENV override (highest priority)
-        env_dir = os.getenv("CLAUDE_SOUNDS_DIR") or os.getenv("AUDIO_SOUNDS_DIR")
-        sounds_dir = Path(env_dir).expanduser() if env_dir else None
-        if sounds_dir and not sounds_dir.is_absolute():
-            sounds_dir = repo_root / sounds_dir
+        # Load config
+        self.config, self.volume, self._throttle_cfg = _load_config(self.repo_root)
 
-        # Load config early
-        cfg = _load_config(here_path.parent / "audio_config.json")
+        # Throttle tracking
+        self._throttle_data: Dict[str, float] = {}
+        self._throttle_lock = Lock()
 
-        # 2) Config base_path if ENV not set
-        if not sounds_dir:
-            try:
-                base = cfg.get("sound_files", {}).get("base_path")
-                if isinstance(base, str):
-                    base_path = Path(base)
-                    sounds_dir = base_path if base_path.is_absolute() else (repo_root / base_path)
-            except Exception:
-                sounds_dir = None
+        # Select audio player
+        self._player_cmd, self._player_args = self._select_player()
 
-        # 3) Default path relative to repo root
-        if not sounds_dir:
-            sounds_dir = repo_root / ".claude" / "sounds"
-
-        # Defaults map to official event names
-        mappings = {
-            "Stop": "task_complete.wav",
-            "SubagentStop": "agent_complete.wav",
-            "Notification": "user_prompt.wav",
-        }
-
-        # Optional config override (config wins over defaults)
-        volume = 0.2
-        throttle_cfg: Dict[str, int] = {}
-
-        try:
-            m = cfg.get("sound_files", {}).get("mappings", {})
-            if isinstance(m, dict):
-                for raw_key, value in m.items():
-                    canonical = _canonical_audio_key(raw_key)
-                    mappings[canonical] = str(value)
-            vol = cfg.get("audio_settings", {}).get("volume")
-            if isinstance(vol, (int, float)):
-                volume = max(0.0, min(1.0, float(vol)))
-            throttle_settings = cfg.get("audio_settings", {}).get("throttle_seconds", {})
-            if isinstance(throttle_settings, dict):
-                for raw_key, value in throttle_settings.items():
-                    if isinstance(value, (int, float)):
-                        canonical = _canonical_audio_key(str(raw_key))
-                        throttle_cfg[canonical] = max(0, int(value))
-        except Exception:
-            pass
-
-        self.config = AudioConfig(base_path=sounds_dir, mappings=mappings)
-        self.volume = volume
-        self._throttle_cfg = throttle_cfg
-
-        # Throttle store under repo_root/logs
-        self._throttle_path = repo_root / "logs" / "audio_throttle.json"
-        try:
-            self._throttle_path.parent.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-
-        # Player selection & timeout
-        self._timeout_s = float(os.getenv("AUDIO_PLAYER_TIMEOUT", "5"))
-        self._player_cmd, self._player_base_args = self._select_player()
-
-    def _select_player(self) -> Tuple[Optional[str], List[str]]:
-        # ENV override first
+    def _select_player(self) -> Tuple[Optional[str], list[str]]:
+        """Select best available audio player."""
+        # ENV override
         cmd = os.getenv("AUDIO_PLAYER_CMD")
-        base_args = os.getenv("AUDIO_PLAYER_ARGS", "").split() if os.getenv("AUDIO_PLAYER_ARGS") else []
         if cmd:
-            return cmd, base_args
-        # Auto-detect
-        if _which("afplay"):
-            args: List[str] = ["-v", f"{self.volume:.3f}"]
-            return "afplay", args
-        if _which("ffplay"):
-            args = ["-nodisp", "-autoexit", "-loglevel", "error", "-volume", str(int(round(self.volume * 100)))]
-            return "ffplay", args
-        if _which("aplay"):
-            return "aplay", []  # aplay doesn't support volume uniformly
-        # Windows fallback: use winsound via Python
-        import platform
-        if platform.system() == "Windows":
-            return "winsound", []  # Special marker for Windows native audio
-        return None, []
+            args = os.getenv("AUDIO_PLAYER_ARGS", "").split()
+            return cmd, args
 
-    def _normalize_key(self, audio_type: str) -> str:
-        return _canonical_audio_key(audio_type)
+        # Auto-detect
+        if _which("afplay"):  # macOS
+            return "afplay", ["-v", f"{self.volume:.3f}"]
+        if _which("ffplay"):  # Linux with ffmpeg
+            return "ffplay", ["-nodisp", "-autoexit", "-loglevel", "error",
+                            "-volume", str(int(self.volume * 100))]
+        if _which("aplay"):   # Linux basic
+            return "aplay", []
+
+        return None, []  # No player available
 
     def resolve_file(self, audio_type: str) -> Optional[Path]:
-        audio_type = self._normalize_key(audio_type)
-        name = self.config.mappings.get(audio_type)
-        if name is None and audio_type == "SubagentStop":
-            name = self.config.mappings.get("Stop")
-        if not name:
+        """Resolve audio type to file path."""
+        # Normalize event name
+        audio_type = audio_type.strip()
+
+        # Get mapped filename
+        filename = self.config.mappings.get(audio_type)
+        if not filename:
             return None
-        p = self.config.base_path / str(name)
-        return p if p.exists() else None
 
-    def get_throttle_window(self, audio_type: str, default_seconds: int) -> int:
-        """Return throttle window for audio_type using config overrides."""
-        audio_type = self._normalize_key(audio_type)
-        cfg_value = self._throttle_cfg.get(audio_type)
-        if isinstance(cfg_value, int) and cfg_value >= 0:
-            return cfg_value
-        return max(0, int(default_seconds))
+        # Check if file exists
+        path = self.config.base_path / filename
+        return path if path.exists() else None
 
-    def play_audio(self, audio_type: str, enabled: bool = False) -> tuple[bool, Optional[Path]]:
-        """Attempt to play local audio. Returns (played, path).
+    def should_throttle_safe(self, key: str, window_seconds: int) -> bool:
+        """Thread-safe throttle check."""
+        with self._throttle_lock:
+            now = time.time()
+            last = self._throttle_data.get(key, 0)
+            return (now - last) < window_seconds
 
-        - If not enabled or file missing, returns (False, maybe_path)
-        - Does not raise on failure
-        """
-        audio_type = self._normalize_key(audio_type)
+    def mark_emitted_safe(self, key: str) -> None:
+        """Thread-safe throttle marking."""
+        with self._throttle_lock:
+            self._throttle_data[key] = time.time()
+
+    def play_audio_safe(self, audio_type: str, enabled: bool = True,
+                       additional_context: Optional[Dict[str, Any]] = None) -> Tuple[bool, Optional[Path], Dict[str, Any]]:
+        """Play audio. Simple and reliable."""
+        context = {
+            "audioType": audio_type,
+            "enabled": enabled,
+            "playerCmd": self._player_cmd,
+            "volume": self.volume,
+            **(additional_context or {})
+        }
+
+        # Check if enabled
+        if not enabled:
+            context.update({"status": "skipped", "reason": "disabled"})
+            return False, None, context
+
+        # Check if player available
+        if not self._player_cmd:
+            context.update({"status": "skipped", "reason": "no_player"})
+            return False, None, context
+
+        # Resolve file path
         path = self.resolve_file(audio_type)
-        if not enabled or path is None:
-            return False, path
+        context["filePath"] = str(path) if path else None
 
-        # Use cached player
-        if self._player_cmd:
-            if self._player_cmd == "winsound":
-                rc = _play_with_windows(str(path), volume=self.volume, timeout_s=self._timeout_s)
-            else:
-                rc = _play_with(self._player_cmd, self._player_base_args + [str(path)], timeout_s=self._timeout_s)
-            return (rc == 0), path
-        return False, path
+        if not path:
+            context.update({"status": "skipped", "reason": "file_not_found"})
+            return False, path, context
 
-    # --- Throttling helpers -------------------------------------------------
-    def _read_throttle(self) -> Dict[str, float]:
+        # Play audio
         try:
-            if self._throttle_path.exists():
-                txt = self._throttle_path.read_text(encoding="utf-8")
-                data = json.loads(txt)
-                if isinstance(data, dict):
-                    # ensure float values
-                    return {str(k): float(v) for k, v in data.items()}
-        except Exception:
-            # Corrupted file: reset empty
-            try:
-                self._throttle_path.write_text("{}", encoding="utf-8")
-            except Exception:
-                pass
-        return {}
+            cmd = [self._player_cmd] + self._player_args + [str(path)]
+            result = subprocess.run(cmd, capture_output=True, timeout=5)
+            success = result.returncode == 0
 
-    def _write_throttle(self, data: Dict[str, float]) -> None:
-        try:
-            # Best-effort advisory lock (POSIX); ignore on platforms lacking fcntl
-            try:
-                import fcntl  # type: ignore
-            except Exception:
-                fcntl = None
-            tmp = self._throttle_path.with_suffix(".tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
-                if fcntl:
-                    try:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                    except Exception:
-                        pass
-                f.write(json.dumps(data))
-                try:
-                    if fcntl:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                except Exception:
-                    pass
-            os.replace(tmp, self._throttle_path)
-        except Exception:
-            pass
+            context.update({
+                "status": "played" if success else "failed",
+                "returnCode": result.returncode
+            })
+            return success, path, context
 
-    def should_throttle(self, key: str, window_seconds: int, now: Optional[float] = None) -> bool:
-        """Return True if an event with `key` should be throttled.
+        except Exception as e:
+            context.update({"status": "failed", "error": str(e)})
+            return False, path, context
 
-        Does not update the last-fired time. Call `mark_emitted` after actually acting.
-        """
-        now = now or time.time()
-        data = self._read_throttle()
-        last = float(data.get(key, 0))
-        return (now - last) < float(window_seconds)
+    # Legacy compatibility methods
+    def play_audio(self, audio_type: str, enabled: bool = False,
+                  additional_context: Optional[Dict[str, Any]] = None) -> Tuple[bool, Optional[Path], Dict[str, Any]]:
+        """Backward compatible audio play method."""
+        return self.play_audio_safe(audio_type, enabled, additional_context)
 
-    def mark_emitted(self, key: str, when: Optional[float] = None) -> None:
-        when = when or time.time()
-        data = self._read_throttle()
-        data[str(key)] = float(when)
-        self._write_throttle(data)
+    def should_throttle(self, key: str, window_seconds: int) -> bool:
+        """Backward compatible throttle check."""
+        return self.should_throttle_safe(key, window_seconds)

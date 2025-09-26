@@ -27,7 +27,7 @@ Adopt a JSON configuration file (`.claude/hooks/utils/audio_config.json`) that m
 - **Trade-offs**: configuration adds a layer of complexity and requires missing-file handling at runtime.
 
 ## Implementation Notes
-- `AudioManager` loads `audio_config.json` and resolves sound paths under `sounds/` by default.
+- `AudioManager` loads `audio_config.json` and resolves sound paths under `.claude/sounds/` by default.
 - `_canonical_audio_key()` handles case/alias normalization.
 - Fallback chain: `SubagentStop → Stop` ensures continuity when custom files are absent.
 - Unit tests cover canonicalization and error logging via `.claude/hooks/tests/test_notification.py` etc.

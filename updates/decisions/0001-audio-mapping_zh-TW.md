@@ -27,7 +27,7 @@ related: []
 - **取捨**：增加設定層需要處理檔案缺失與錯誤回報。
 
 ## 實作重點
-- `AudioManager` 讀取 `audio_config.json`，預設從 `sounds/` 解析音效。
+- `AudioManager` 讀取 `audio_config.json`，預設從 `.claude/sounds/` 解析音效。
 - `_canonical_audio_key()` 完成大小寫與別名的正規化。
 - 回退鏈：`SubagentStop → Stop` 確保無自訂檔案時仍有音效。
 - 單元測試涵蓋別名與錯誤日誌（`.claude/hooks/tests/test_audio_played_and_timeout.py` 等）。

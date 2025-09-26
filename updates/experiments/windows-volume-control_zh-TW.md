@@ -8,7 +8,7 @@
 ## 設定
 - 平台：Windows 11 (22H2)
 - Python：3.11，僅使用標準函式庫
-- 測試音效：儲存在 `sounds/` 內的 2–3 秒 WAV 範例
+- 測試音效：儲存在 `.claude/sounds/` 內的 2–3 秒 WAV 範例
 - 環境變數：不設定 `AUDIO_PLAYER_CMD`，確保真實播放
 
 ## 步驟

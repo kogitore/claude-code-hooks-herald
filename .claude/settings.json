@@ -2,95 +2,91 @@
   "hooks": {
     "Notification": [
       {
-        "matcher": ".*",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook Notification --enable-audio"
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook Notification"
           }
         ]
       }
     ],
     "Stop": [
       {
-        "matcher": ".*",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook Stop --enable-audio"
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook Stop"
           }
         ]
       }
     ],
     "SubagentStop": [
       {
-        "matcher": ".*",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook SubagentStop --enable-audio"
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook SubagentStop"
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": ".*",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook PreToolUse"
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook PreToolUse"
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": ".*",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook PostToolUse"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook UserPromptSubmit"
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook PostToolUse"
           }
         ]
       }
     ],
     "SessionStart": [
       {
-        "matcher": ".*",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook SessionStart"
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook SessionStart"
           }
         ]
       }
     ],
     "SessionEnd": [
       {
-        "matcher": ".*",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook SessionEnd"
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook SessionEnd"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/herald.py --hook UserPromptSubmit"
           }
         ]
       }
     ]
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "bun x ccusage statusline"
   }
 }

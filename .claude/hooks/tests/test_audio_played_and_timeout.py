@@ -1,6 +1,22 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+# Removed per TESTS_CLEANUP_GUIDE Phase 1
+import json
+import time
+from common_test_utils import run_hook
+
+def test_audio_play_and_timeout_behavior() -> None:
+    payload = {"hookEventName": "Notification", "message": "timeout test"}
+    r = run_hook(".claude/hooks/notification.py", payload=payload, args=["--enable-audio"])
+    assert r.returncode == 0
+    obj = json.loads([ln for ln in r.stdout.splitlines() if ln.strip()][-1])
+    assert obj["continue"] is True
+    # If audio player is missing, stderr should contain a note (but not fail)
+    assert "afplay" in (r.stderr or "") or r.stderr == ""
+#!/usr/bin/env python3
+from __future__ import annotations
+
 import os
 import wave
 import struct
