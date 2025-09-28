@@ -33,7 +33,8 @@ class AudioConfig:
 
 def _which(cmd: str) -> bool:
     """Check if command exists in PATH."""
-    return subprocess.run(["which", cmd], capture_output=True).returncode == 0
+    import shutil
+    return shutil.which(cmd) is not None
 
 
 def _load_config(repo_root: Path) -> Tuple[AudioConfig, float, Dict[str, int]]:

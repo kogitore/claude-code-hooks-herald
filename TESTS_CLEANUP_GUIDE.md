@@ -154,7 +154,7 @@ wc -l .claude/hooks/tests/*.py | tail -1
 # 目標: ~800-1000 行 (從 1772 行減少)
 
 # 3. 功能測試
-python -m pytest .claude/hooks/tests/ -v
+uv run pytest .claude/hooks/tests/ -v
 # 確保核心功能測試通過
 ```
 

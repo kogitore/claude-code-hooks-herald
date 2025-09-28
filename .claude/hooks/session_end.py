@@ -159,8 +159,8 @@ def main() -> int:  # pragma: no cover
         payload = json.loads(raw)
     except Exception:
         payload = {}
-    from mini_dispatcher import dispatch as mini_dispatch
-    response = mini_dispatch(SESSION_END, payload=payload, enable_audio=False)
+    from herald import dispatch
+    response = dispatch(SESSION_END, payload=payload, enable_audio=False)
     print(json.dumps(response))
     return 0
 

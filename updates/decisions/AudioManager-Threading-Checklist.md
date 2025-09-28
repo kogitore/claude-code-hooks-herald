@@ -12,7 +12,7 @@
 
 #### ✅ Step 1: 環境準備
 - [ ] `cp utils/audio_manager.py utils/audio_manager.py.backup`
-- [ ] 確認當前音效功能正常: `python3 herald.py --hook Notification --enable-audio`
+- [ ] 確認當前音效功能正常: `uv run herald.py --hook Notification --enable-audio`
 - [ ] 記錄基準性能: 測量當前 `play_audio()` 執行時間
 
 #### ✅ Step 2: 添加線程鎖基礎設施
@@ -428,12 +428,12 @@ if __name__ == "__main__":
 ## 🔍 驗證檢查點
 
 ### 基本功能驗證
-- [ ] **匯入測試**: `python3 -c "from utils.audio_manager import AudioManager; AudioManager()"`
-- [ ] **播放測試**: `python3 herald.py --hook Notification --enable-audio`
+- [ ] **匯入測試**: `uv run python -c "from utils.audio_manager import AudioManager; AudioManager()"`
+- [ ] **播放測試**: `uv run herald.py --hook Notification --enable-audio`
 - [ ] **節流測試**: 快速執行同一 hook 兩次，檢查節流效果
 
 ### 線程安全驗證
-- [ ] **並發測試**: `python3 test_audio_threading.py`
+- [ ] **並發測試**: `uv run python test_audio_threading.py`
 - [ ] **壓力測試**: 同時執行多個 Herald hook
 - [ ] **檔案鎖測試**: 檢查節流檔案在並發訪問下的完整性
 

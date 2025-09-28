@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/herald.py --hook Notification"
+            "command": "uv run .claude/hooks/herald.py --hook Notification"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/herald.py --hook Stop"
+            "command": "uv run .claude/hooks/herald.py --hook Stop"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/herald.py --hook SubagentStop"
+            "command": "uv run .claude/hooks/herald.py --hook SubagentStop"
           }
         ]
       }
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/herald.py --hook PreToolUse"
+            "command": "uv run .claude/hooks/herald.py --hook PreToolUse"
           }
         ]
       }
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/herald.py --hook PostToolUse"
+            "command": "uv run .claude/hooks/herald.py --hook PostToolUse"
           }
         ]
       }
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/herald.py --hook SessionStart"
+            "command": "uv run .claude/hooks/herald.py --hook SessionStart"
           }
         ]
       }
@@ -72,7 +72,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/herald.py --hook SessionEnd"
+            "command": "uv run .claude/hooks/herald.py --hook SessionEnd"
           }
         ]
       }
@@ -83,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/herald.py --hook UserPromptSubmit"
+            "command": "uv run .claude/hooks/herald.py --hook UserPromptSubmit"
           }
         ]
       }

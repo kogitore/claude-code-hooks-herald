@@ -118,7 +118,7 @@ SAFE_COMMAND='{"tool": "bash", "toolInput": {"command": "echo hello"}}'
 export AUDIO_PLAYER_CMD=true
 DECISION_RESULT=$(echo "$SAFE_COMMAND" | ./.claude/hooks/herald.py --hook PreToolUse --json-only 2>/dev/null | head -1 || echo "{}")
 
-if echo "$DECISION_RESULT" | python3 -c "
+if echo "$DECISION_RESULT" | uv run python -c "
 import json, sys
 try:
     data = json.load(sys.stdin)
@@ -188,7 +188,7 @@ fi
 log_test_start "Audio system integration test"
 
 # Test audio manager import and basic functionality
-AUDIO_TEST=$(PYTHONPATH=".claude/hooks" python3 -c "
+AUDIO_TEST=$(cd .claude/hooks && uv run python -c "
 import sys
 sys.path.insert(0, '.claude/hooks')
 try:

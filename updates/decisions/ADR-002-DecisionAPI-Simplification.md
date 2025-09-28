@@ -143,7 +143,7 @@ cp utils/decision_api.py utils/decision_api.py.backup
 ### Step 6: Update Tests
 ```bash
 # Update existing tests to match simplified API
-python3 tests/test_integration_verification.py
+uv run python tests/test_integration_verification.py
 ```
 
 ## Expected Outcomes

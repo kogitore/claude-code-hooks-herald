@@ -13,7 +13,7 @@
 #### ✅ Step 1: 環境準備
 - [ ] `git checkout -b refactor/decision-api-simplification`
 - [ ] `cp utils/decision_api.py utils/decision_api.py.backup`
-- [ ] 確認測試可執行：`python3 tests/test_integration_verification.py`
+- [ ] 確認測試可執行：`uv run python tests/test_integration_verification.py`
 
 #### ✅ Step 2: 移除過度抽象化 (目標：-120 行)
 **移除以下代碼段：**
@@ -131,7 +131,7 @@ def __init__(self, config_manager: ConfigManager = None, policy_path: Path = Non
 - [ ] **基本功能測試:**
   ```bash
   cd .claude/hooks
-  python3 -c "from utils.decision_api import DecisionAPI; api = DecisionAPI(); print('✅ Import successful')"
+  uv run python -c "from utils.decision_api import DecisionAPI; api = DecisionAPI(); print('✅ Import successful')"
   ```
 
 - [ ] **決策邏輯測試:**
@@ -146,7 +146,7 @@ def __init__(self, config_manager: ConfigManager = None, policy_path: Path = Non
   assert result.blocked == False
   ```
 
-- [ ] **整合測試:** `python3 tests/test_integration_verification.py`
+- [ ] **整合測試:** `uv run python tests/test_integration_verification.py`
 
 #### ✅ Step 8: 性能驗證
 ```python
@@ -200,7 +200,7 @@ cp utils/decision_api.py.backup utils/decision_api.py
 3. **重構後**: 執行完整測試套件，比較結果
 
 ### 關鍵驗證點
-- [ ] Herald CLI 仍可正常執行: `python3 herald.py --hook Notification --json-only`
+- [ ] Herald CLI 仍可正常執行: `uv run herald.py --hook Notification --json-only`
 - [ ] 危險命令仍被正確攔截
 - [ ] ConfigManager 整合功能正常
 - [ ] 所有 hook 模組可正常載入 DecisionAPI

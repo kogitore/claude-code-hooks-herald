@@ -134,7 +134,7 @@ else
         log_success "audio_config.json has valid JSON syntax"
 
         # Extract base_path from audio config
-        BASE_PATH=$(python3 -c "
+        BASE_PATH=$(uv run python -c "
 import json
 with open('.claude/hooks/utils/audio_config.json') as f:
     config = json.load(f)

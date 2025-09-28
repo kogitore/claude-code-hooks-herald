@@ -67,7 +67,7 @@ if command -v aplay >/dev/null 2>&1; then
 fi
 
 # Windows/Cross-platform - Python winsound (check if available)
-if python3 -c "import winsound" 2>/dev/null; then
+if uv run python -c "import winsound" 2>/dev/null; then
     AUDIO_PLAYERS+=("winsound (Python)")
     log_success "winsound module available (Python)"
 fi
@@ -88,7 +88,7 @@ echo -e "\n${BLUE}🐍 Step 2: Python Environment Check${NC}"
 echo "------------------------------------------------"
 
 # Check Python version
-PYTHON_VERSION=$(python3 --version 2>&1 | cut -d' ' -f2)
+PYTHON_VERSION=$(uv run python --version 2>&1 | cut -d' ' -f2)
 log_success "Python version: $PYTHON_VERSION"
 
 # Check if we're in project directory
@@ -116,7 +116,7 @@ for import_spec in "${PYTHON_IMPORTS[@]}"; do
     module=$(echo "$import_spec" | cut -d':' -f1)
     description=$(echo "$import_spec" | cut -d':' -f2)
 
-    if python3 -c "import $module" 2>/dev/null; then
+    if uv run python -c "import $module" 2>/dev/null; then
         log_success "$module ($description)"
     else
         log_error "Failed to import $module ($description)"
@@ -130,7 +130,7 @@ echo "------------------------------------------------"
 # Test herald.py imports
 if [ -f ".claude/hooks/herald.py" ]; then
     # Test basic herald import path setup
-    PYTHONPATH=".claude/hooks" python3 -c "
+    cd .claude/hooks && uv run python -c "
 import sys
 sys.path.insert(0, '.claude/hooks')
 try:

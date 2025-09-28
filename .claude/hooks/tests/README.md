@@ -9,13 +9,13 @@ This folder contains lightweight, black-box tests for the three audio hooks in `
 ## Run All Tests
 
 ```
-python3 .claude/hooks/tests/run_tests.py
+uv run .claude/hooks/tests/run_tests.py
 ```
 
 Optional demo to verify local audio playback (macOS `afplay`):
 
 ```
-python3 .claude/hooks/tests/run_tests.py --demo-sound --sounds ./.claude/sounds
+uv run .claude/hooks/tests/run_tests.py --demo-sound --sounds ./.claude/sounds
 ```
 
 Notes:
