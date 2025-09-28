@@ -69,20 +69,37 @@ def _play_audio(audio_type: Optional[str], throttle_key: Optional[str], throttle
     if not audio_type:
         return
     try:
-        am = _AM()
-        # Optional throttle: if provided by handler, honor it
-        if throttle_key and isinstance(throttle_window, int) and throttle_window > 0:
+        # Extra safety: Use timeout for entire audio operation on Windows
+        import platform
+        import threading
+
+        def audio_worker():
             try:
-                if am.should_throttle_safe(throttle_key, throttle_window):
-                    return
+                am = _AM()
+                # Optional throttle: if provided by handler, honor it
+                if throttle_key and isinstance(throttle_window, int) and throttle_window > 0:
+                    try:
+                        if am.should_throttle_safe(throttle_key, throttle_window):
+                            return
+                    except Exception:
+                        pass
+                played, _path, _ctx = am.play_audio_safe(audio_type, enabled=True)
+                if played and throttle_key and isinstance(throttle_window, int) and throttle_window > 0:
+                    try:
+                        am.mark_emitted_safe(throttle_key)
+                    except Exception:
+                        pass
             except Exception:
                 pass
-        played, _path, _ctx = am.play_audio_safe(audio_type, enabled=True)
-        if played and throttle_key and isinstance(throttle_window, int) and throttle_window > 0:
-            try:
-                am.mark_emitted_safe(throttle_key)
-            except Exception:
-                pass
+
+        # On Windows, use thread with timeout to prevent hanging
+        if platform.system().lower() == "windows":
+            thread = threading.Thread(target=audio_worker, daemon=True)
+            thread.start()
+            thread.join(timeout=1.0)  # Max 1 second wait
+        else:
+            audio_worker()  # Direct execution on Unix systems
+
     except Exception:
         pass
 

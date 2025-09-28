@@ -95,14 +95,30 @@ class AudioManager:
             args = os.getenv("AUDIO_PLAYER_ARGS", "").split()
             return cmd, args
 
-        # Auto-detect
-        if _which("afplay"):  # macOS
-            return "afplay", ["-v", f"{self.volume:.3f}"]
-        if _which("ffplay"):  # Linux with ffmpeg
-            return "ffplay", ["-nodisp", "-autoexit", "-loglevel", "error",
-                            "-volume", str(int(self.volume * 100))]
-        if _which("aplay"):   # Linux basic
-            return "aplay", []
+        # Auto-detect by platform
+        import platform
+        system = platform.system().lower()
+
+        if system == "windows":
+            # Windows: Try winsound first (built-in), then PowerShell
+            try:
+                import winsound
+                return "winsound", []  # Special marker for winsound
+            except ImportError:
+                pass
+            if _which("powershell"):
+                return "powershell", ["-Command", f"(New-Object System.Media.SoundPlayer '{{0}}').PlaySync()"]
+            # Fallback: No audio player (silent mode)
+            return None, []
+        elif system == "darwin":  # macOS
+            if _which("afplay"):
+                return "afplay", ["-v", f"{self.volume:.3f}"]
+        else:  # Linux and others
+            if _which("ffplay"):
+                return "ffplay", ["-nodisp", "-autoexit", "-loglevel", "error",
+                                "-volume", str(int(self.volume * 100))]
+            if _which("aplay"):
+                return "aplay", []
 
         return None, []  # No player available
 
@@ -163,8 +179,30 @@ class AudioManager:
 
         # Play audio
         try:
-            cmd = [self._player_cmd] + self._player_args + [str(path)]
-            result = subprocess.run(cmd, capture_output=True, timeout=5)
+            import platform
+            system = platform.system().lower()
+
+            if system == "windows" and self._player_cmd == "winsound":
+                # Windows winsound: Direct Python API (most reliable)
+                try:
+                    import winsound
+                    winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC)
+                    context.update({"status": "played", "method": "winsound"})
+                    return True, path, context
+                except Exception as e:
+                    context.update({"status": "failed", "error": f"winsound: {e}"})
+                    return False, path, context
+
+            elif system == "windows" and self._player_cmd == "powershell":
+                # Windows PowerShell: Format path correctly and use shorter timeout
+                cmd = [self._player_cmd] + [arg.format(str(path)) for arg in self._player_args]
+                result = subprocess.run(cmd, capture_output=True, timeout=2,
+                                      creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0)
+            else:
+                # Unix systems: Standard approach
+                cmd = [self._player_cmd] + self._player_args + [str(path)]
+                result = subprocess.run(cmd, capture_output=True, timeout=3)
+
             success = result.returncode == 0
 
             context.update({
@@ -173,6 +211,9 @@ class AudioManager:
             })
             return success, path, context
 
+        except subprocess.TimeoutExpired:
+            context.update({"status": "failed", "error": "timeout"})
+            return False, path, context
         except Exception as e:
             context.update({"status": "failed", "error": str(e)})
             return False, path, context
