@@ -94,7 +94,7 @@ def _initialise_session(context: Dict[str, Any]) -> str:
     if environment:
         session_summary["environment"] = environment
 
-    context_str = json.dumps(session_summary, ensure_ascii=False)
+    context_str = json.dumps(session_summary, ensure_ascii=True)
 
     return context_str
 

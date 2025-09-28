@@ -140,7 +140,7 @@ def dispatch(event: str, payload: Dict[str, Any], enable_audio: bool = False) ->
             addl = dp.get("additionalContext", "")
             if isinstance(addl, (dict, list)):
                 try:
-                    addl = json.dumps(addl, ensure_ascii=False)
+                    addl = json.dumps(addl, ensure_ascii=True)
                 except Exception:
                     addl = ""
             response["hookSpecificOutput"] = {"hookEventName": event, "additionalContext": addl}

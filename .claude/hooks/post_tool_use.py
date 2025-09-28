@@ -85,7 +85,7 @@ def _append_audit(record: Dict[str, Any]) -> None:
     try:
         AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with AUDIT_LOG_PATH.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            f.write(json.dumps(record, ensure_ascii=True) + "\n")
     except OSError:
         pass
 

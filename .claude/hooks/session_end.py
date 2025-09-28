@@ -91,7 +91,7 @@ def _finalise_session(context: Dict[str, Any]) -> str:
         "skippedResources": list(skipped),
     }
 
-    context_str = json.dumps(summary, ensure_ascii=False)
+    context_str = json.dumps(summary, ensure_ascii=True)
 
     return context_str
 

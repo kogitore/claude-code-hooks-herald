@@ -140,7 +140,7 @@ def _read_rate_tracker() -> Dict[str, float]:
 def _write_rate_tracker(data: Dict[str, float]) -> None:
     try:
         RATE_LIMIT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        RATE_LIMIT_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        RATE_LIMIT_PATH.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
     except Exception:
         pass
 
@@ -150,7 +150,7 @@ def _record_submission(record: Dict[str, Any]) -> None:
         PROMPT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         record["recordedAt"] = _utc_timestamp()
         with PROMPT_LOG_PATH.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+            fh.write(json.dumps(record, ensure_ascii=True) + "\n")
     except OSError:
         pass
 
