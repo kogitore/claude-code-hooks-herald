@@ -19,7 +19,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from utils.constants import SESSION_END
-from utils.session_storage import load_state, write_state, append_event_log
+from utils.session_storage import load_state
+from utils.session_storage import write_state
+from utils.session_storage import append_event_log
 from utils.handler_result import HandlerResult
 
 
@@ -159,8 +161,8 @@ def main() -> int:  # pragma: no cover
         payload = json.loads(raw)
     except Exception:
         payload = {}
-    from herald import dispatch
-    response = dispatch(SESSION_END, payload=payload, enable_audio=False)
+    from herald import dispatch  # type: ignore[import-not-found]
+    response = dispatch(SESSION_END, payload=payload)
     print(json.dumps(response))
     return 0
 

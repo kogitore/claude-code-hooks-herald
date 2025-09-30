@@ -26,7 +26,6 @@ from utils.handler_result import HandlerResult
 
 
 PROMPT_LOG_PATH = Path(__file__).resolve().parents[2] / "logs" / "prompt_submissions.jsonl"
-RATE_LIMIT_PATH = Path(__file__).resolve().parents[2] / "logs" / "prompt_rates.json"
 MAX_PROMPT_LENGTH = 4000
 MAX_PREVIEW = 240
 RATE_LIMIT_SECONDS = 1.0
@@ -37,28 +36,38 @@ SUSPICIOUS_PATTERNS = [
     (re.compile(r"(https?://)?(?:[\w-]+\.){1,}onion", re.IGNORECASE), "tor_link"),
 ]
 
+# Memory-based rate limiting (no disk I/O)
+_RATE_LIMIT_CACHE: Dict[str, float] = {}
+_CACHE_CLEANUP_INTERVAL = 300  # Clean old entries every 5 minutes
+_LAST_CLEANUP = time.time()
+
 
 def _process_prompt(context: Dict[str, Any]) -> Tuple[Dict[str, Any], Tuple[str, ...], Optional[str], bool]:
-    prompt, issues = _extract_prompt(context)
-    metadata = context.get("metadata") if isinstance(context.get("metadata"), dict) else {}
+    """Process user prompt with validation, rate limiting, and issue detection."""
+    prompt, issues_list = _extract_prompt(context)
     user_id = context.get("user_id") or context.get("userId")
     session_id = context.get("session_id") or context.get("sessionId")
     timestamp = context.get("timestamp") if isinstance(context.get("timestamp"), str) else _utc_timestamp()
 
+    # Collect all issues
+    issues_list = list(issues_list)
     rate_issue = _check_rate_limit(user_id, session_id)
     if rate_issue:
-        issues += (rate_issue,)
-    suspicious = _scan_prompt(prompt)
-    issues += suspicious
+        issues_list.append(rate_issue)
+    issues_list.extend(_scan_prompt(prompt))
 
-    truncated = False
+    # Truncate if needed
     sanitized = prompt.strip()
-    if len(sanitized) > MAX_PROMPT_LENGTH:
+    truncated = len(sanitized) > MAX_PROMPT_LENGTH
+    if truncated:
         sanitized = sanitized[:MAX_PROMPT_LENGTH]
-        truncated = True
-        issues += ("prompt_truncated",)
+        issues_list.append("prompt_truncated")
 
+    # Deduplicate issues (preserve order)
+    issues = tuple(dict.fromkeys(issues_list))
     should_alert = bool(issues)
+
+    # Build payload (flattened structure)
     payload = {
         "userPrompt": {
             "prompt": sanitized,
@@ -71,24 +80,23 @@ def _process_prompt(context: Dict[str, Any]) -> Tuple[Dict[str, Any], Tuple[str,
         payload["userPrompt"]["userId"] = str(user_id)
     if session_id:
         payload["userPrompt"]["sessionId"] = str(session_id)
-    if metadata:
-        payload["userPrompt"]["metadata"] = metadata
+    if metadata := context.get("metadata"):
+        if isinstance(metadata, dict):
+            payload["userPrompt"]["metadata"] = metadata
     if issues:
-        payload["userPrompt"]["issues"] = list(dict.fromkeys(issues))
-    if should_alert:
+        payload["userPrompt"]["issues"] = list(issues)
         payload["userPrompt"]["requiresAttention"] = True
 
     preview = sanitized[:MAX_PREVIEW] if sanitized else None
 
-    _record_submission(
-        {
-            "timestamp": timestamp,
-            "userId": user_id,
-            "sessionId": session_id,
-            "length": len(sanitized),
-            "issues": list(dict.fromkeys(issues)),
-        }
-    )
+    # Log submission
+    _record_submission({
+        "timestamp": timestamp,
+        "userId": user_id,
+        "sessionId": session_id,
+        "length": len(sanitized),
+        "issues": list(issues),
+    })
     return payload, issues, preview, should_alert
 
 
@@ -114,35 +122,23 @@ def _scan_prompt(prompt: str) -> Tuple[str, ...]:
 
 
 def _check_rate_limit(user_id: Any, session_id: Any) -> Optional[str]:
+    """Memory-based rate limiting with automatic cache cleanup."""
+    global _LAST_CLEANUP
     ref = str(user_id or session_id or "global")
     now = time.time()
-    data = _read_rate_tracker()
-    last = data.get(ref)
-    data[ref] = now
-    _write_rate_tracker(data)
+
+    # Periodic cleanup: remove entries older than 10 minutes
+    if now - _LAST_CLEANUP > _CACHE_CLEANUP_INTERVAL:
+        cutoff = now - 600  # 10 minutes ago
+        _RATE_LIMIT_CACHE.clear()  # Simple approach: clear all on cleanup
+        _LAST_CLEANUP = now
+
+    last = _RATE_LIMIT_CACHE.get(ref)
+    _RATE_LIMIT_CACHE[ref] = now
+
     if isinstance(last, (int, float)) and now - float(last) < RATE_LIMIT_SECONDS:
         return "rate_limited"
     return None
-
-
-def _read_rate_tracker() -> Dict[str, float]:
-    if not RATE_LIMIT_PATH.exists():
-        return {}
-    try:
-        content = json.loads(RATE_LIMIT_PATH.read_text(encoding="utf-8"))
-        if isinstance(content, dict):
-            return {str(k): float(v) for k, v in content.items() if isinstance(v, (int, float))}
-    except Exception:
-        pass
-    return {}
-
-
-def _write_rate_tracker(data: Dict[str, float]) -> None:
-    try:
-        RATE_LIMIT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        RATE_LIMIT_PATH.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
-    except Exception:
-        pass
 
 
 def _record_submission(record: Dict[str, Any]) -> None:
@@ -194,8 +190,8 @@ def main() -> int:  # pragma: no cover
         payload = json.loads(raw)
     except Exception:
         payload = {}
-    from herald import dispatch
-    response = dispatch(USER_PROMPT_SUBMIT, payload=payload, enable_audio=False)
+    from herald import dispatch  # type: ignore[import-not-found]
+    response = dispatch(USER_PROMPT_SUBMIT, payload=payload)
     print(json.dumps(response))
     return 0
 

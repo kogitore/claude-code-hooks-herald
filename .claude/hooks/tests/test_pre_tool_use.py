@@ -12,7 +12,7 @@ MODULE_ROOT = REPO_ROOT / ".claude" / "hooks"
 if str(MODULE_ROOT) not in sys.path:
     sys.path.insert(0, str(MODULE_ROOT))
 
-from herald import HANDLERS
+from herald import dispatch
 from utils import constants
 
 
@@ -20,8 +20,7 @@ class TestPreToolUseHook(unittest.TestCase):
     """Validates tool extraction, decision policy integration, and fallbacks."""
 
     def _dispatch(self, payload: dict):
-        disp = build_default_dispatcher()
-        return disp.dispatch(constants.PRE_TOOL_USE, payload=payload)
+        return dispatch(constants.PRE_TOOL_USE, payload=payload)
 
     def test_safe_command_allows_execution(self) -> None:
         payload = {
@@ -29,8 +28,8 @@ class TestPreToolUseHook(unittest.TestCase):
             "tool_input": {"file_path": "README.md"},
         }
         report = self._dispatch(payload)
-        self.assertTrue(report.response.get("continue", False))
-        hso = report.response.get("hookSpecificOutput", {})
+        self.assertTrue(report.get("continue", False))
+        hso = report.get("hookSpecificOutput", {})
         self.assertEqual(hso.get("hookEventName"), constants.PRE_TOOL_USE)
         self.assertEqual(hso.get("permissionDecision"), "allow")
 
@@ -40,8 +39,8 @@ class TestPreToolUseHook(unittest.TestCase):
             "toolInput": {"command": "rm -rf /"},
         }
         report = self._dispatch(payload)
-        self.assertFalse(report.response.get("continue", True))
-        hso = report.response.get("hookSpecificOutput", {})
+        self.assertFalse(report.get("continue", True))
+        hso = report.get("hookSpecificOutput", {})
         self.assertEqual(hso.get("permissionDecision"), "deny")
 
     def test_invalid_tool_input_promotes_manual_review(self) -> None:
@@ -50,8 +49,8 @@ class TestPreToolUseHook(unittest.TestCase):
             "tool_input": "{not-json",
         }
         report = self._dispatch(payload)
-        self.assertFalse(report.response.get("continue", True))
-        hso = report.response.get("hookSpecificOutput", {})
+        self.assertFalse(report.get("continue", True))
+        hso = report.get("hookSpecificOutput", {})
         self.assertEqual(hso.get("permissionDecision"), "ask")
 
     def test_decision_api_failure_falls_back_to_ask(self) -> None:
@@ -59,8 +58,8 @@ class TestPreToolUseHook(unittest.TestCase):
         import utils.decision_api as dec
         with patch.object(dec.DecisionAPI, "pre_tool_use_decision", side_effect=RuntimeError("boom")):
             report = self._dispatch({"tool": "bash"})
-        self.assertFalse(report.response.get("continue", True))
-        hso = report.response.get("hookSpecificOutput", {})
+        self.assertFalse(report.get("continue", True))
+        hso = report.get("hookSpecificOutput", {})
         self.assertEqual(hso.get("permissionDecision"), "ask")
 
 

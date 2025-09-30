@@ -146,8 +146,8 @@ def main() -> int:  # pragma: no cover
         payload = json.loads(sys.stdin.read().strip() or "{}")
     except Exception:
         payload = {}
-    from herald import dispatch
-    response = dispatch(POST_TOOL_USE, payload=payload, enable_audio=False)
+    from herald import dispatch  # type: ignore[import-not-found]
+    response = dispatch(POST_TOOL_USE, payload=payload)
     print(json.dumps(response))
     return 0
 

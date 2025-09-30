@@ -128,8 +128,8 @@ def main() -> int:  # pragma: no cover
     except Exception:
         payload = {}
     # Use herald dispatcher for consistency
-    from herald import dispatch
-    response = dispatch(PRE_TOOL_USE, payload, enable_audio=False)
+    from herald import dispatch  # type: ignore[import-not-found]
+    response = dispatch(PRE_TOOL_USE, payload)
     print(json.dumps(response))
     return 0
 
