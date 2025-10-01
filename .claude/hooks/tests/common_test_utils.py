@@ -1,46 +1,70 @@
-#!/usr/bin/env python3
-"""Common test utilities for hooks testing."""
+"""Utility helpers for exercising hook entrypoints in tests."""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Mapping, Sequence
+
+
+@dataclass(frozen=True)
+class RunResult:
+    """Captured result of invoking a hook script via subprocess."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+    def json(self) -> dict[str, Any]:
+        """Parse the last non-empty stdout line as JSON."""
+        lines = [line for line in self.stdout.splitlines() if line.strip()]
+        if not lines:
+            raise ValueError("Hook produced no JSON output")
+        return json.loads(lines[-1])
 
 
 def repo_root() -> Path:
-    """Return the repository root directory."""
+    """Return the repository root detected from this file location."""
     return Path(__file__).resolve().parents[3]
 
 
-class RunResult:
-    """Result of running a hook script."""
-    def __init__(self, returncode: int, stdout: str, stderr: str):
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
-
-
-def run_hook(script_relpath: str, payload: Dict[str, Any] | None = None, args: list[str] | None = None) -> RunResult:
-    """Run a hook script with given payload and arguments."""
-    repo = repo_root()
-    script_path = repo / script_relpath
-
-    cmd = ["python3", str(script_path)]
+def run_hook(
+    script_relpath: str,
+    payload: Mapping[str, Any] | None = None,
+    args: Sequence[str] | None = None,
+    *,
+    timeout: float = 5.0,
+    env: Mapping[str, str] | None = None,
+) -> RunResult:
+    """Execute a hook script with a JSON payload and capture its output."""
+    root = repo_root()
+    script_path = root / script_relpath
+    command = [sys.executable, str(script_path)]
     if args:
-        cmd.extend(args)
+        command.extend(args)
 
-    payload_json = json.dumps(payload or {})
+    base_env = os.environ.copy()
+    base_env.setdefault("AUDIO_PLAYER_CMD", "true")
+    base_env.setdefault("AUDIO_PLAYER_ARGS", "")
+    if env:
+        base_env.update(env)
 
-    try:
-        result = subprocess.run(
-            cmd,
-            input=payload_json,
-            text=True,
-            capture_output=True,
-            cwd=repo,
-            env={"AUDIO_PLAYER_CMD": "true"}  # Disable audio during tests
-        )
-        return RunResult(result.returncode, result.stdout, result.stderr)
-    except Exception as e:
-        return RunResult(1, "", str(e))
+    payload_json = json.dumps(dict(payload or {}), ensure_ascii=False)
+
+    completed = subprocess.run(
+        command,
+        input=payload_json,
+        text=True,
+        capture_output=True,
+        cwd=root,
+        env=base_env,
+        timeout=timeout,
+    )
+    return RunResult(
+        returncode=completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+    )
