@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""SessionEnd hook — minimal.
-
-Kept:
- - resource cleanup within session directory
- - state update + event log append
- - JSON additionalContext with removed/skipped
- - audio_type flag
-
-Removed: walls of aspirational nonsense.
-"""
+"""SessionEnd hook - simplified session cleanup and state management."""
 from __future__ import annotations
 
 import argparse
@@ -16,14 +7,16 @@ import json
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 
 from utils.constants import SESSION_END
-from utils.session_storage import load_state, write_state, append_event_log
+from utils.session_storage import load_state
+from utils.session_storage import write_state
+from utils.session_storage import append_event_log
 from utils.handler_result import HandlerResult
 
 
-def handle_session_end(context) -> "HandlerResult":  # type: ignore[name-defined]
+def handle_session_end(context) -> HandlerResult:
+    """Handle session end event - cleanup and state finalization."""
     hr = HandlerResult()
     hr.audio_type = SESSION_END
     try:
@@ -37,7 +30,8 @@ def handle_session_end(context) -> "HandlerResult":  # type: ignore[name-defined
     return hr
 
 
-def _finalise_session(context: Dict[str, Any]) -> str:
+def _finalise_session(context: dict[str, object]) -> str:
+    """Finalize session - cleanup resources and update state."""
     session_id = context.get("session_id") or context.get("sessionId") or "unknown-session"
     if not isinstance(session_id, str):
         session_id = str(session_id)
@@ -46,7 +40,7 @@ def _finalise_session(context: Dict[str, Any]) -> str:
     duration = _parse_duration(context.get("duration"))
     termination_reason = context.get("termination_reason") or context.get("reason") or "normal"
     statistics = context.get("statistics") if isinstance(context.get("statistics"), dict) else {}
-    resources = context.get("resources_to_cleanup") or context.get("cleanup" ) or []
+    resources = context.get("resources_to_cleanup") or context.get("cleanup") or []
     if not isinstance(resources, list):
         resources = []
 
@@ -55,31 +49,38 @@ def _finalise_session(context: Dict[str, Any]) -> str:
     state = load_state()
     session_entry = state.get(session_id, {}) if isinstance(state, dict) else {}
     session_entry.setdefault("state", {})
-    session_entry["state"].update({"status": "ended", "endedAt": end_time, "termination": termination_reason})
-    if duration is not None:
-        session_entry["state"]["durationSeconds"] = duration
-    session_entry.setdefault("history", []).append(
-        {
+
+    if isinstance(session_entry.get("state"), dict):
+        session_entry["state"].update({  # type: ignore[union-attr]
+            "status": "ended",
+            "endedAt": end_time,
+            "termination": termination_reason
+        })
+        if duration is not None:
+            session_entry["state"]["durationSeconds"] = duration  # type: ignore[index]
+
+    session_entry.setdefault("history", [])
+    if isinstance(session_entry.get("history"), list):
+        session_entry["history"].append({  # type: ignore[union-attr]
             "event": "session_end",
             "timestamp": end_time,
             "termination": termination_reason,
             "removed": removed,
             "skipped": skipped,
-        }
-    )
+        })
+
     session_entry["statistics"] = statistics
     state[session_id] = session_entry
     write_state(state)
-    append_event_log(
-        {
-            "sessionId": session_id,
-            "event": "session_end",
-            "timestamp": end_time,
-            "termination": termination_reason,
-            "removed": removed,
-            "skipped": skipped,
-        }
-    )
+
+    append_event_log({
+        "sessionId": session_id,
+        "event": "session_end",
+        "timestamp": end_time,
+        "termination": termination_reason,
+        "removed": removed,
+        "skipped": skipped,
+    })
 
     summary = {
         "sessionId": session_id,
@@ -91,14 +92,11 @@ def _finalise_session(context: Dict[str, Any]) -> str:
         "skippedResources": list(skipped),
     }
 
-    context_str = json.dumps(summary, ensure_ascii=False)
-
-    return context_str
-
-    # Properties removed with class
+    return json.dumps(summary, ensure_ascii=True)
 
 
-def _parse_duration(value: Any) -> Optional[float]:
+def _parse_duration(value: object) -> float | None:
+    """Parse duration value to float."""
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, str):
@@ -109,10 +107,12 @@ def _parse_duration(value: Any) -> Optional[float]:
     return None
 
 
-def _cleanup_resources(session_id: str, resources: List[Any]) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
-    removed: List[str] = []
-    skipped: List[str] = []
+def _cleanup_resources(session_id: str, resources: list[object]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Cleanup session resources safely."""
+    removed: list[str] = []
+    skipped: list[str] = []
     base = _session_root_path(session_id)
+
     for item in resources:
         if not isinstance(item, str):
             continue
@@ -135,10 +135,12 @@ def _cleanup_resources(session_id: str, resources: List[Any]) -> Tuple[Tuple[str
                 skipped.append(str(candidate))
         except Exception:
             skipped.append(str(candidate))
+
     return tuple(removed), tuple(skipped)
 
 
 def _session_root_path(session_id: str) -> Path:
+    """Get session root path."""
     base = Path("logs/sessions")
     if not base.is_absolute():
         base = Path(__file__).resolve().parents[2] / base
@@ -146,21 +148,26 @@ def _session_root_path(session_id: str) -> Path:
 
 
 def _utc_timestamp() -> str:
+    """Get current UTC timestamp in ISO format."""
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def main() -> int:  # pragma: no cover
-    parser = argparse.ArgumentParser(description="Claude Code SessionEnd (function)")
-    parser.add_argument("--enable-audio", action="store_true")
+def main() -> int:
+    """Entry point for manual invocations."""
+    parser = argparse.ArgumentParser(description="Claude Code SessionEnd hook")
+    parser.add_argument("--enable-audio", action="store_true",
+                       help="Enable audio feedback")
     _ = parser.parse_args()
+
     try:
         raw = sys.stdin.read().strip() or "{}"
         payload = json.loads(raw)
     except Exception:
         payload = {}
-    from mini_dispatcher import dispatch as mini_dispatch
-    response = mini_dispatch(SESSION_END, payload=payload, enable_audio=False)
+
+    from herald import dispatch  # pyright: ignore[reportImplicitRelativeImport]
+    response = dispatch(SESSION_END, payload=payload)
     print(json.dumps(response))
     return 0
 

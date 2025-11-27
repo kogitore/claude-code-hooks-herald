@@ -1,6 +1,6 @@
 {
   "sound_files": {
-    "base_path": "./.claude/sounds",
+    "base_path": "./.claude/sounds/default",
     "mappings": {
       "Stop": "task_complete.wav",
       "SubagentStop": "agent_complete.wav",
@@ -13,7 +13,7 @@
     }
   },
   "audio_settings": {
-    "volume": 0.2,
+    "volume": 0.1,
     "throttle_seconds": {
       "Stop": 120,
       "SubagentStop": 120,

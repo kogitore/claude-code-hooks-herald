@@ -1,66 +1,79 @@
 #!/usr/bin/env python3
-"""Notification hook - simplified function-based implementation.
-
-This module provides a simple handler for the Notification event that does not
-depend on BaseHook. It returns only the metadata needed by the dispatcher to
-play audio and produce the JSON response.
-"""
+"""Notification hook implementation."""
 from __future__ import annotations
 
 import argparse
 import json
 import sys
-from typing import Dict, Optional
 
-# Simple stdin parser (was utils.common_io)
-def parse_stdin():
-    import json, sys
-    try:
-        raw = sys.stdin.read().strip()
-        return json.loads(raw) if raw else {}, None
-    except Exception:
-        return {}, None
-from utils.handler_result import HandlerResult
 from utils.constants import NOTIFICATION
+from utils.handler_result import HandlerResult
 
 
-# Dispatcher-facing handler
-def handle_notification(context) -> "HandlerResult":  # type: ignore[name-defined]
-    hr = HandlerResult()
-    hr.audio_type = NOTIFICATION
-    # throttle window will be resolved by dispatcher defaults/config
-    return hr
+def handle_notification(context) -> HandlerResult:
+    """Return a result instructing the dispatcher to play the notification tone."""
+    result = HandlerResult()
+    result.audio_type = context.event_type or NOTIFICATION
+    return result
 
 
-# Optional CLI for manual testing (plays audio directly when enabled)
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--enable-audio", dest="enable_audio", action="store_true", help="Enable actual audio playback")
-    ap.add_argument("--json-only", dest="json_only", action="store_true", help="Reserved for compatibility")
-    args = ap.parse_args()
-
-    payload, _ = parse_stdin()
-
-    # If audio is enabled, play the notification sound directly for manual runs
-    audio_ctx = {"audioType": NOTIFICATION, "enabled": False, "status": "skipped", "hookType": "Notification"}
-    if args.enable_audio:
-        from utils.audio_manager import AudioManager
-
-        am = AudioManager()
-        played, path, ctx = am.play_audio_safe(NOTIFICATION, enabled=True, additional_context={"source": "notification_cli"})
-        audio_ctx = dict(ctx or {})
-        audio_ctx.update({"audioType": NOTIFICATION, "enabled": True, "status": "played" if played else "skipped", "hookType": "Notification"})
-
-    # JSON output contract (legacy-compatible structured context)
+def _read_payload() -> dict[str, object]:
+    """Read JSON payload from stdin, returning empty dict on failure."""
+    raw = sys.stdin.read().strip()
+    if not raw:
+        return {}
     try:
-        print(json.dumps({"continue": True, "additionalContext": {"audioContext": audio_ctx}}))
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def main() -> int:
+    """Entry point for manual invocations."""
+    parser = argparse.ArgumentParser(description="Claude Code Notification hook")
+    parser.add_argument("--enable-audio", action="store_true",
+                       help="Play the configured notification sound")
+    parser.add_argument("--json-only", action="store_true",
+                       help="Retained for compatibility; no behavioural impact")
+    args = parser.parse_args()
+
+    _payload = _read_payload()
+
+    # Build audio context
+    audio_context = {"audioType": NOTIFICATION, "enabled": False,
+                    "status": "skipped", "hookType": "Notification"}
+
+    if args.enable_audio:
+        try:
+            from utils.audio_manager import AudioManager
+            manager = AudioManager()
+            played, _path, context = manager.play_audio_safe(
+                NOTIFICATION, enabled=True,
+                additional_context={"source": "notification_cli"}
+            )
+            audio_context.update({
+                **context,
+                "audioType": NOTIFICATION,
+                "enabled": True,
+                "status": "played" if played else "skipped",
+                "hookType": "Notification",
+            })
+        except Exception:
+            audio_context["reason"] = "audio_manager_unavailable"
+
+    response = {"continue": True, "additionalContext": {"audioContext": audio_context}}
+
+    try:
+        print(json.dumps(response, ensure_ascii=False))
     except Exception:
         print("{\"continue\": true}")
-    # Emit a minimal stderr marker for tests
+
     try:
         print("[Notification] invoked", file=sys.stderr)
-    except Exception:
+    except OSError:
         pass
+
     return 0
 
 
