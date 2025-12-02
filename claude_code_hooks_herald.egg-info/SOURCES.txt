@@ -1,0 +1,11 @@
+LICENSE
+README.md
+pyproject.toml
+claude_code_hooks_herald.egg-info/PKG-INFO
+claude_code_hooks_herald.egg-info/SOURCES.txt
+claude_code_hooks_herald.egg-info/dependency_links.txt
+claude_code_hooks_herald.egg-info/entry_points.txt
+claude_code_hooks_herald.egg-info/requires.txt
+claude_code_hooks_herald.egg-info/top_level.txt
+scripts/check_herald_integration.py
+scripts/test_notion_connection.py

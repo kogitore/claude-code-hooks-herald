@@ -6,6 +6,95 @@ Commit messages are recommended to follow [Conventional Commits](https://www.con
 
 ## [Unreleased]
 
+## [0.5.0-dev] - 2025-12-01
+### 🚀 Architecture Modernization & Notion Integration
+
+Major release featuring Herald toolkit consolidation, Notion project/task management, and Skill Auto-Activation system. Based on [Anthropic Engineering Blog](https://www.anthropic.com/engineering/claude-code-best-practices) and patterns from [claude-code-infrastructure-showcase](https://github.com/diet103/claude-code-infrastructure-showcase).
+
+#### Added
+
+##### **Herald Toolkit** (`.claude/herald/`)
+New unified toolkit package for Claude Code enhancements:
+- **`herald/__init__.py`** - Core package with version management
+- **`herald/notion/`** - Notion API integration module
+- **`herald/dev-tools/`** - Development utilities (health check, integration tests)
+
+##### **Notion Integration** (`.claude/herald/notion/`)
+Complete project and task management system:
+- **`client.py`** - `NotionClient` API wrapper with context manager support
+- **`project.py`** - `ProjectManager` with auto-detection using folder name
+- **`tasks.py`** - `TaskManager` with `TaskDefinition`, `TaskPriority`, `TaskType` enums
+- **`cli.py`** - CLI interface for project/task operations
+
+Usage:
+```bash
+uv run python .claude/herald/notion/cli.py project info
+uv run python .claude/herald/notion/cli.py tasks create
+```
+
+##### **Skills System** (`.claude/skills/`)
+Extensible skill auto-activation framework:
+- **`skill-rules.json`** - JSON configuration for 8 skills with triggers
+  - `test`, `refactor`, `debug`, `review`, `docs`, `hooks`, `notion-integration`, `security`
+  - Supports keyword matching and regex intent patterns
+  - Traditional Chinese keywords support (測試, 重構, 錯誤, etc.)
+- **`skill_rules.py`** - Skill rules loader with caching and fallback
+- **`notion-integration/SKILL.md`** - Notion skill documentation
+
+##### **Slash Commands** (`.claude/commands/`)
+- **`/notion-sync`** - Sync current project to Notion
+- **`/notion-task`** - Quick task creation with type inference
+
+##### **Block-at-Commit Strategy** (`pre_tool_use.py`)
+- Only blocks at `git commit` time, not during Edit/Write operations
+- Gate file mechanism: `/tmp/hooks-herald-tests-pass`
+- Bypass with `HOOKS_SKIP_COMMIT_GATE=1`
+
+##### **Test Coverage**
+- `test_skill_suggestions.py`: 12 tests for skill detection
+- `test_commit_gate.py`: 9 tests for commit gate behavior
+- Enhanced `conftest.py` with `build_default_dispatcher()`
+
+#### Changed
+
+##### **Directory Restructure**
+- Moved `scripts/notion/` → `.claude/herald/notion/`
+- Moved `scripts/*.sh` → `.claude/herald/dev-tools/`
+- Deleted root `scripts/` directory (keeps project root clean)
+
+##### **Hook System Modernization**
+All hooks simplified with function-based handlers:
+- **`herald.py`** - Direct handler dispatch (no middleware layers)
+- **`session_start.py`** / **`session_end.py`** - Minimal session tracking
+- **`user_prompt_submit.py`** - Now uses `skill_rules.py` for dynamic skill suggestions
+- **`pre_tool_use.py`** / **`post_tool_use.py`** - Audio-only paths, simplified security
+
+##### **Type Safety** (Python 3.10+)
+- `dict[str, object]` instead of `Dict[str, Any]`
+- `str | None` union syntax (PEP 604)
+- `from __future__ import annotations` throughout
+- `Callable` from `collections.abc`
+
+##### **Pyproject Configuration**
+```toml
+[project.scripts]
+herald-notion = "herald.notion.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = [".claude/herald"]
+```
+
+#### Fixed
+- `test_audio_played_and_timeout.py`: Duplicate shebang/imports causing SyntaxError
+- Import path issues after directory restructure
+- Module resolution for herald package
+
+#### Documentation
+- Added `docs/OPTIMIZATION_ROADMAP.md`: Community best practices roadmap
+- Added `docs/dev/` pattern for development context preservation
+
+---
+
 ## [0.4.0-dev] - 2025-09-24
 ### 🔥 Major System Simplification - Linus-Style Architecture Cleanup
 

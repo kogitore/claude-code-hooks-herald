@@ -1,0 +1,264 @@
+{
+    "version": "1.0",
+    "description": "Skill activation triggers for Claude Code Hooks Herald. Controls when skills automatically suggest based on prompt content.",
+    "skills": {
+        "test": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "Testing and test coverage guidance",
+            "promptTriggers": {
+                "keywords": [
+                    "pytest",
+                    "unittest",
+                    "test coverage",
+                    "run tests",
+                    "test suite",
+                    "測試",
+                    "跑測試",
+                    "單元測試"
+                ],
+                "intentPatterns": [
+                    "(run|execute|write).*?test",
+                    "test.*?(coverage|pass|fail)",
+                    "(how to|how do I).*?test"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "**/tests/**/*.py",
+                    "**/*_test.py",
+                    "**/test_*.py"
+                ],
+                "contentPatterns": [
+                    "import pytest",
+                    "import unittest",
+                    "def test_"
+                ]
+            }
+        },
+        "refactor": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "medium",
+            "description": "Code refactoring and cleanup guidance",
+            "promptTriggers": {
+                "keywords": [
+                    "refactor",
+                    "clean up",
+                    "reorganize",
+                    "simplify",
+                    "restructure",
+                    "重構",
+                    "整理",
+                    "簡化"
+                ],
+                "intentPatterns": [
+                    "(refactor|clean|reorganize|simplify).*?(code|function|class|module)",
+                    "(how to|best way).*?(refactor|simplify|clean)"
+                ]
+            }
+        },
+        "debug": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "Debugging and error fixing guidance",
+            "promptTriggers": {
+                "keywords": [
+                    "error",
+                    "bug",
+                    "fix",
+                    "broken",
+                    "exception",
+                    "traceback",
+                    "錯誤",
+                    "修復",
+                    "問題",
+                    "壞掉"
+                ],
+                "intentPatterns": [
+                    "(fix|debug|solve|resolve).*?(error|bug|issue|problem)",
+                    "(why|what).*?(error|fail|broken|not working)",
+                    "(how to|how do I).*?(fix|debug|solve)"
+                ]
+            }
+        },
+        "review": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "medium",
+            "description": "Code review and quality assessment",
+            "promptTriggers": {
+                "keywords": [
+                    "review",
+                    "code review",
+                    "PR review",
+                    "pull request",
+                    "審查",
+                    "檢視",
+                    "看一下"
+                ],
+                "intentPatterns": [
+                    "(review|check|assess).*?(code|PR|pull request|changes)",
+                    "(is this|is my).*?(code|implementation).*?(good|correct|ok)"
+                ]
+            }
+        },
+        "docs": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "low",
+            "description": "Documentation and docstring writing",
+            "promptTriggers": {
+                "keywords": [
+                    "document",
+                    "documentation",
+                    "docstring",
+                    "readme",
+                    "文件",
+                    "說明",
+                    "註解"
+                ],
+                "intentPatterns": [
+                    "(write|add|create|update).*?(doc|documentation|docstring|readme)",
+                    "(how to|how do I).*?(document|explain)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "**/README.md",
+                    "**/docs/**/*.md",
+                    "**/*.rst"
+                ]
+            }
+        },
+        "hooks": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "Claude Code hooks development (specific to this project)",
+            "promptTriggers": {
+                "keywords": [
+                    "hook",
+                    "hooks",
+                    "herald",
+                    "pre_tool_use",
+                    "post_tool_use",
+                    "session_start",
+                    "audio",
+                    "notification"
+                ],
+                "intentPatterns": [
+                    "(create|add|modify|fix).*?hook",
+                    "(how do|how does).*?hook.*?(work|trigger)",
+                    "(audio|sound|notification).*?(play|trigger)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    ".claude/hooks/**/*.py",
+                    ".claude/hooks/utils/**/*.py"
+                ],
+                "contentPatterns": [
+                    "from herald import",
+                    "HandlerResult",
+                    "handle_.*?\\("
+                ]
+            }
+        },
+        "notion-integration": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "medium",
+            "description": "Notion integration and task management",
+            "skillPath": ".claude/skills/notion-integration/SKILL.md",
+            "promptTriggers": {
+                "keywords": [
+                    "notion",
+                    "task",
+                    "project",
+                    "sync",
+                    "任務",
+                    "專案",
+                    "同步"
+                ],
+                "intentPatterns": [
+                    "(create|add|update|sync).*?(task|project)",
+                    "(task|project).*?(notion|management)",
+                    "notion.*?(API|integration|sync)",
+                    "(建立|新增|同步).*?(任務|專案)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    ".claude/herald/notion/**/*.py"
+                ],
+                "contentPatterns": [
+                    "NotionClient",
+                    "NOTION_API_TOKEN",
+                    "ProjectManager",
+                    "TaskManager"
+                ]
+            },
+            "relatedCommands": [
+                "/notion-sync",
+                "/notion-task"
+            ]
+        },
+        "security": {
+            "type": "guardrail",
+            "enforcement": "suggest",
+            "priority": "critical",
+            "description": "Security-sensitive operations",
+            "promptTriggers": {
+                "keywords": [
+                    "password",
+                    "secret",
+                    "credential",
+                    "api key",
+                    "token",
+                    ".env",
+                    "密碼",
+                    "金鑰"
+                ],
+                "intentPatterns": [
+                    "(store|save|commit).*?(password|secret|credential|key|token)",
+                    "(access|read|modify).*?(\\.env|secret|credential)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "**/.env",
+                    "**/.env.*",
+                    "**/secrets/**",
+                    "**/credentials/**"
+                ],
+                "contentPatterns": [
+                    "API_KEY",
+                    "SECRET",
+                    "PASSWORD",
+                    "TOKEN"
+                ]
+            }
+        }
+    },
+    "notes": {
+        "enforcement_types": {
+            "suggest": "Skill suggestion appears but doesn't block execution",
+            "block": "Requires skill to be used before proceeding (guardrail)",
+            "warn": "Shows warning but allows proceeding"
+        },
+        "priority_levels": {
+            "critical": "Highest - Always trigger when matched",
+            "high": "Important - Trigger for most matches",
+            "medium": "Moderate - Trigger for clear matches",
+            "low": "Optional - Trigger only for explicit matches"
+        },
+        "customization": {
+            "pathPatterns": "Adjust to match your project structure",
+            "keywords": "Add domain-specific terms relevant to your project (including Chinese)",
+            "intentPatterns": "Use regex for flexible user intent matching"
+        }
+    }
+}

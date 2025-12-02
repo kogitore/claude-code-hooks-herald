@@ -1,0 +1,7 @@
+notion-client>=2.2.1
+
+[dev]
+pytest>=8.2.0
+
+[test]
+pytest>=8.2.0

@@ -1,0 +1,2 @@
+[console_scripts]
+test-notion = scripts.test_notion_connection:main

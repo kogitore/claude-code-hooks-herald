@@ -1,55 +1,68 @@
+Metadata-Version: 2.4
+Name: claude-code-hooks-herald
+Version: 0.4.0
+Summary: Herald system for Claude Code hooks with audio feedback and Notion integration
+Author: Claude Code Hooks Herald Team
+License: MIT
+Project-URL: Homepage, https://github.com/anthropics/claude-code-hooks-herald
+Project-URL: Documentation, https://github.com/anthropics/claude-code-hooks-herald/blob/main/README.md
+Project-URL: Repository, https://github.com/anthropics/claude-code-hooks-herald
+Project-URL: Issues, https://github.com/anthropics/claude-code-hooks-herald/issues
+Keywords: claude-code,hooks,audio,notion,productivity
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: notion-client>=2.2.1
+Provides-Extra: test
+Requires-Dist: pytest>=8.2.0; extra == "test"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.2.0; extra == "dev"
+Dynamic: license-file
+
 <div align="center">
 
 [English](./README.md) | [繁體中文](./README_zh-TW.md)
 
-**Changelog:** see [CHANGELOG.md](./CHANGELOG.md) · **Documentation:** see [/docs](./docs/)
+**Changelog:** see [CHANGELOG.md](./CHANGELOG.md) · **Design/Notes:** see [/updates](./updates/)
 
 </div>
 
-> Inspired by [disler/claude-code-hooks-mastery](https://github.com/disler/claude-code-hooks-mastery) and [claude-code-infrastructure-showcase](https://github.com/diet103/claude-code-infrastructure-showcase)
+> Inspired by [disler/claude-code-hooks-mastery](https://github.com/disler/claude-code-hooks-mastery)
 
 # Claude Code Hooks Herald
 
-Unified hooks system and toolkit for Claude Code. Herald provides audio notifications, Notion project management, skill auto-activation, and configurable security policies — all through a single dispatcher.
+Unified dispatcher + audio-only hook system for Claude Code. Herald routes every official event through a single entry point, plays local audio with throttling, and applies a configurable safety policy before tools run.
 
 ## Features
 
-- 🛡️ **Herald Dispatcher** – Single entry point (`.claude/hooks/herald.py`) for all 8 official Claude Code events
-- 🔔 **Audio Feedback** – Local `.wav` playback for notifications and completion cues with smart throttling
-- 📋 **Notion Integration** – Project/task management with auto-detection (uses folder name as project)
-- 🧠 **Skill Auto-Activation** – Suggests relevant skills based on prompt content (supports Traditional Chinese)
-- ⚡ **Slash Commands** – `/notion-sync`, `/notion-task` for quick operations
-- 🔒 **Security Policy** – Allow/Deny/Ask/BlockStop responses with customizable rules
-- ✅ **Claude Code Compatible** – Full support for both legacy and standard field formats
-
-## Project Structure
-
-```
-.claude/
-├── commands/           # Slash commands (/notion-sync, /notion-task)
-├── herald/             # Herald toolkit
-│   ├── notion/         # Notion API integration
-│   └── dev-tools/      # Development utilities
-├── hooks/              # Hook handlers (herald.py dispatcher)
-│   ├── utils/          # Shared utilities (audio, config, decision API)
-│   └── tests/          # Test suite
-├── skills/             # Skill definitions & auto-activation rules
-│   └── skill-rules.json
-└── sounds/             # Audio files (.wav)
-```
+- 🛡️ **Herald dispatcher** – Single entry point (`.claude/hooks/herald.py`) for 8/9 official Claude Code events (8 implemented, PreCompact pending).
+- 🧩 **BaseHook framework** – Shared validation + playback pipeline keeps individual hooks tiny and reliable.
+- 🧠 **Decision API** – Allow/Deny/Ask/BlockStop responses with user overrides via `decision_policy.json`.
+- 🔔 **Audio feedback** – Local `.wav` playback for notifications and completion cues.
+- ⏱️ **Smart throttling** – Config-driven per-event cooldowns to prevent sound spam.
+- ✅ **Claude Code Compatible** – Full support for both legacy and standard field formats (`tool_name`/`tool_input`).
 
 ## Quick Start
 
 ### Prerequisites
 
 **System Requirements:**
-- **Claude Code CLI** - [Install Claude Code](https://claude.ai/code)
-- **Python 3.10+** (tested on Python 3.11-3.14)
+- **Claude Code CLI** - [Install Claude Code](https://claude.ai/code) (this hooks system integrates with Claude Code)
+- **Python 3.9+** (tested on Python 3.11-3.13)
 - **uv** (ultra-fast Python package manager) - [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
 - **Git** (for cloning repository)
 - **Audio System:**
   - **macOS:** `afplay` (built-in)
-  - **Linux:** `ffplay` (ffmpeg) or `aplay` (alsa-utils)
+  - **Linux:** `ffplay` (ffmpeg package) or `aplay` (alsa-utils)
   - **Windows:** `winsound` (built-in with Python)
 
 **Install uv (if not already installed):**
@@ -164,7 +177,7 @@ Safety decisions (Allow / Deny / Ask / BlockStop) are defined in `.claude/hooks/
 
 User rules are appended to the defaults, so built-in protections remain active.
 
-**Quick start:** copy `.claude/hooks/utils/decision_policy.example.json` to `decision_policy.json`, remove the sections you do not need, then adjust regex patterns/reasons. The template documents common scenarios (package installs, git resets, credential files) and defaults to `allow` when no rule matches. See [docs/adr/0003-decision-policy-template.md](./docs/adr/0003-decision-policy-template.md) for full guidance.
+**Quick start:** copy `.claude/hooks/utils/decision_policy.example.json` to `decision_policy.json`, remove the sections you do not need, then adjust regex patterns/reasons. The template documents common scenarios (package installs, git resets, credential files) and defaults to `allow` when no rule matches. See [updates/decisions/0003-decision-policy-template.md](./updates/decisions/0003-decision-policy-template.md) for full guidance.
 
 **Built-in tags** (usable in the `tags` array):
 
@@ -183,80 +196,6 @@ Provide your own `.wav` files in `.claude/sounds/`:
 - `task_complete.wav` – Played for Stop events
 - `agent_complete.wav` – Played for SubagentStop events
 - `user_prompt.wav` – Played for Notifications
-
-## Notion Integration
-
-Herald includes a complete Notion project/task management system. Project names are auto-detected from your folder name.
-
-### Setup
-
-1. Create a Notion integration at [notion.so/my-integrations](https://www.notion.so/my-integrations)
-2. Copy `.env.example` to `.env` and configure:
-   ```bash
-   NOTION_API_TOKEN=secret_xxx
-   NOTION_PROJECT_DATABASE_ID=xxx   # Your projects database
-   NOTION_TASK_DATABASE_ID=xxx      # Your tasks database
-   ```
-3. Share your Notion databases with the integration
-
-### CLI Usage
-
-```bash
-# Check current project status
-uv run python .claude/herald/notion/cli.py project info
-
-# Create/get project in Notion (auto-detects name from folder)
-uv run python .claude/herald/notion/cli.py project create
-
-# List tasks
-uv run python .claude/herald/notion/cli.py tasks list
-
-# Create task interactively
-uv run python .claude/herald/notion/cli.py tasks create
-```
-
-### Slash Commands
-
-- **`/notion-sync`** – Sync current project to Notion
-- **`/notion-task 實作登入功能`** – Quick task creation with type inference
-
-### Python API
-
-```python
-import sys
-sys.path.insert(0, ".claude/herald")
-
-from notion import NotionClient, ProjectManager, TaskManager
-from notion.tasks import TaskDefinition, TaskPriority
-
-with NotionClient() as client:
-    pm = ProjectManager(client)
-    project_id, created = pm.get_or_create_project()
-
-    tm = TaskManager(client, pm)
-    task = TaskDefinition(name="新功能", priority=TaskPriority.HIGH)
-    tm.create_task(task, project_id)
-```
-
-## Skill Auto-Activation
-
-Skills are automatically suggested based on prompt content. Configure triggers in `.claude/skills/skill-rules.json`:
-
-```json
-{
-  "skills": {
-    "test": {
-      "priority": "high",
-      "promptTriggers": {
-        "keywords": ["pytest", "unittest", "測試"],
-        "intentPatterns": ["(run|execute).*?test"]
-      }
-    }
-  }
-}
-```
-
-Built-in skills: `test`, `refactor`, `debug`, `review`, `docs`, `hooks`, `notion-integration`, `security`
 
 ## Testing
 
@@ -280,10 +219,7 @@ MIT License - see LICENSE file for details
 
 ## Acknowledgments
 
-This project was inspired by:
-- [disler/claude-code-hooks-mastery](https://github.com/disler/claude-code-hooks-mastery) - Original hooks patterns
-- [diet103/claude-code-infrastructure-showcase](https://github.com/diet103/claude-code-infrastructure-showcase) - Skill auto-activation pattern
-- [Anthropic Engineering Blog](https://www.anthropic.com/engineering/claude-code-best-practices) - Best practices for Claude Code
+This project was inspired by Claude Code's hook system examples and the [claude-code-hooks-mastery](https://github.com/disler/claude-code-hooks-mastery) project.
 
 ## Output & Environment
 
