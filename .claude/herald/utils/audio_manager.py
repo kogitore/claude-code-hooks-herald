@@ -47,7 +47,79 @@ def _which(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
 
-def _load_config(repo_root: Path) -> tuple[AudioConfig, float, dict[str, int]]:
+@dataclass
+class HeraldSettings:
+    """Herald settings from settings.json."""
+
+    volume: float = 0.3
+    quiet_hours_start: tuple[int, int] | None = None  # (hour, minute)
+    quiet_hours_end: tuple[int, int] | None = None
+
+
+def _parse_time_str(time_str: str) -> tuple[int, int] | None:
+    """Parse HH:MM time string to (hour, minute) tuple."""
+    try:
+        parts = time_str.split(":")
+        if len(parts) == 2:
+            hour, minute = int(parts[0]), int(parts[1])
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                return (hour, minute)
+    except (ValueError, AttributeError):
+        pass
+    return None
+
+
+def _load_herald_settings(repo_root: Path) -> HeraldSettings:
+    """Load herald settings from settings.json."""
+    settings_path = repo_root / ".claude" / "settings.json"
+    result = HeraldSettings()
+
+    try:
+        if settings_path.exists():
+            data = json.loads(settings_path.read_text())
+            herald = data.get("herald", {})
+
+            # Volume (0-1 range)
+            if "volume" in herald:
+                result.volume = float(herald["volume"])
+
+            # Quiet hours
+            quiet_hours = herald.get("quiet_hours", {})
+            if quiet_hours:
+                start = quiet_hours.get("start")
+                end = quiet_hours.get("end")
+                if start and end:
+                    result.quiet_hours_start = _parse_time_str(start)
+                    result.quiet_hours_end = _parse_time_str(end)
+
+    except Exception as e:
+        _log.warning("Failed to load herald settings: %s", e)
+
+    return result
+
+
+def _is_in_quiet_hours(settings: HeraldSettings) -> bool:
+    """Check if current time is within quiet hours."""
+    if not settings.quiet_hours_start or not settings.quiet_hours_end:
+        return False
+
+    from datetime import datetime
+
+    now = datetime.now()
+    current = (now.hour, now.minute)
+    start = settings.quiet_hours_start
+    end = settings.quiet_hours_end
+
+    # Handle overnight quiet hours (e.g., 22:00 - 08:00)
+    if start > end:
+        # Quiet period spans midnight
+        return current >= start or current < end
+    else:
+        # Normal period (e.g., 12:00 - 13:30)
+        return start <= current < end
+
+
+def _load_config(repo_root: Path) -> tuple[AudioConfig, float, dict[str, int], HeraldSettings]:
     """Load audio configuration. Simple and direct."""
     config_path = repo_root / ".claude" / "herald" / "config" / "audio_config.json"
 
@@ -56,6 +128,9 @@ def _load_config(repo_root: Path) -> tuple[AudioConfig, float, dict[str, int]]:
     mappings: dict[str, str] = {}
     volume = 0.2
     throttle: dict[str, int] = {}
+
+    # Load herald settings first (user preferences)
+    herald_settings = _load_herald_settings(repo_root)
 
     try:
         if config_path.exists():
@@ -71,7 +146,7 @@ def _load_config(repo_root: Path) -> tuple[AudioConfig, float, dict[str, int]]:
                 if "mappings" in sf:
                     mappings = sf["mappings"]
 
-            # Extract settings
+            # Extract settings from audio_config.json as fallback
             if "audio_settings" in data:
                 settings = data["audio_settings"]
                 volume = float(settings.get("volume", 0.2))
@@ -81,7 +156,11 @@ def _load_config(repo_root: Path) -> tuple[AudioConfig, float, dict[str, int]]:
     except Exception as e:
         _log.warning("Failed to load audio config: %s", e)
 
-    return AudioConfig(base_path, mappings), volume, throttle
+    # Herald settings.json volume takes precedence
+    if herald_settings.volume != 0.3:  # Not default
+        volume = herald_settings.volume
+
+    return AudioConfig(base_path, mappings), volume, throttle, herald_settings
 
 
 class AudioManager:
@@ -92,7 +171,7 @@ class AudioManager:
         self.repo_root = Path(__file__).resolve().parents[3]
 
         # Load config
-        self.config, self.volume, self._throttle_cfg = _load_config(self.repo_root)
+        self.config, self.volume, self._throttle_cfg, self._herald_settings = _load_config(self.repo_root)
 
         # Throttle tracking
         self._throttle_data: dict[str, float] = {}
@@ -100,6 +179,10 @@ class AudioManager:
 
         # Select audio player
         self._player_cmd, self._player_args = self._select_player()
+
+    def is_in_quiet_hours(self) -> bool:
+        """Check if current time is within configured quiet hours."""
+        return _is_in_quiet_hours(self._herald_settings)
 
     def _select_player(self) -> tuple[str | None, list[str]]:
         """Select best available audio player using declarative mapping."""
@@ -186,6 +269,11 @@ class AudioManager:
         # Check if enabled
         if not enabled:
             context.update({"status": "skipped", "reason": "disabled"})
+            return False, None, context
+
+        # Check quiet hours
+        if self.is_in_quiet_hours():
+            context.update({"status": "skipped", "reason": "quiet_hours"})
             return False, None, context
 
         # Check if player available

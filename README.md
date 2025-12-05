@@ -14,7 +14,7 @@ Unified hooks system and toolkit for Claude Code. Herald provides audio notifica
 
 ## Features
 
-- 🛡️ **Herald Dispatcher** – Single entry point (`.claude/hooks/herald.py`) for all 8 official Claude Code events
+- 🛡️ **Herald Dispatcher** – Single entry point (`.claude/herald/dispatcher.py`) for all 8 official Claude Code events
 - 🔔 **Audio Feedback** – Local `.wav` playback for notifications and completion cues with smart throttling
 - 📋 **Notion Integration** – Project/task management with auto-detection (uses folder name as project)
 - 🧠 **Skill Auto-Activation** – Suggests relevant skills based on prompt content (supports Traditional Chinese)
@@ -27,15 +27,18 @@ Unified hooks system and toolkit for Claude Code. Herald provides audio notifica
 ```
 .claude/
 ├── commands/           # Slash commands (/notion-sync, /notion-task)
-├── herald/             # Herald toolkit
-│   ├── notion/         # Notion API integration
-│   └── dev-tools/      # Development utilities
-├── hooks/              # Hook handlers (herald.py dispatcher)
+├── herald/             # Herald toolkit (unified dispatcher)
+│   ├── dispatcher.py   # Single entry point for all hooks
+│   ├── handlers/       # Individual hook handlers
 │   ├── utils/          # Shared utilities (audio, config, decision API)
-│   └── tests/          # Test suite
+│   ├── config/         # Audio and policy configuration
+│   ├── notion/         # Notion API integration
+│   ├── tests/          # Test suite
+│   └── dev-tools/      # Development utilities
 ├── skills/             # Skill definitions & auto-activation rules
 │   └── skill-rules.json
 └── sounds/             # Audio files (.wav)
+    └── default/        # Default sound pack
 ```
 
 ## Quick Start
@@ -71,7 +74,7 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
    cd claude-code-hooks-herald
    ```
 
-2. **Provide sound files:** Place `.wav` files in `.claude/sounds/`:
+2. **Provide sound files:** Place `.wav` files in `.claude/sounds/default/`:
    ```bash
    # Required audio files:
    # - task_complete.wav (for Stop events)
@@ -79,23 +82,44 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
    # - user_prompt.wav (for Notifications)
    ```
 
-3. **Confirm settings:** `.claude/settings.json` is pre-configured to route all events through `herald.py`. Copy to your Claude project:
+3. **Run the interactive installer:**
    ```bash
-   cp .claude/settings.json /path/to/your/claude/project/.claude/
+   python3 install.py
+   ```
+
+   The installer will:
+   - Ask for your preferred **volume** (0-100%)
+   - Ask for optional **quiet hours** (e.g., 22:00-08:00 for no audio at night)
+   - Write settings to `.claude/settings.json` (preserves existing settings)
+   - Create a backup of any existing settings file
+
+   **Example session:**
+   ```
+   【音量設定】
+   請輸入音量 (0-100) [預設: 30]: 50
+
+   【靜音時段設定】
+   是否要設定靜音時段? (y/N): y
+   請輸入靜音開始時間 [範例: 22:00]: 22:00
+   請輸入靜音結束時間 [範例: 08:00]: 08:00
+
+   設定摘要:
+     音量: 50%
+     靜音時段: 22:00 - 08:00
    ```
 
 4. **Set executable permissions:**
    ```bash
-   chmod +x .claude/hooks/*.py
+   chmod +x .claude/herald/dispatcher.py
    ```
 
 5. **Test installation:**
    ```bash
    # Test herald system
-   echo '{"message": "test"}' | uv run .claude/hooks/herald.py --hook Notification --enable-audio
+   echo '{"message": "test"}' | uv run .claude/herald/dispatcher.py --hook Notification
 
    # Test security policy
-   echo '{"tool": "bash", "toolInput": {"command": "rm -rf /"}}' | uv run .claude/hooks/herald.py --hook PreToolUse
+   echo '{"tool": "bash", "toolInput": {"command": "rm -rf /"}}' | uv run .claude/herald/dispatcher.py --hook PreToolUse
    ```
 
 ### Verification
@@ -106,9 +130,9 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 **Troubleshooting:**
 - **No audio:**
-  - Check `.claude/sounds/` directory exists with `.wav` files
+  - Check `.claude/sounds/default/` directory exists with `.wav` files
   - Linux: Install audio dependencies: `sudo apt-get install ffmpeg` or `sudo apt-get install alsa-utils`
-- **Permission errors:** Run `chmod +x .claude/hooks/*.py`
+- **Permission errors:** Run `chmod +x .claude/herald/dispatcher.py`
 - **Python/uv not found:** Ensure both are in your `$PATH`
 - **Claude Code not detecting hooks:** Verify `.claude/settings.json` is in your project root
 - **"Module not found" errors:** Run from the repository root directory
