@@ -69,30 +69,56 @@ def _read_stdin() -> dict[str, object]:
         return {}
 
 
+# Global throttle: minimum interval between ANY audio playback
+_GLOBAL_THROTTLE_KEY = "__global__"
+_GLOBAL_THROTTLE_SECONDS = 5  # seconds
+
+
 def _play_audio(audio_type: str | None, throttle_key: str | None, throttle_window: int | None) -> None:
     """Play audio unconditionally (manager decides details) with optional throttling.
 
     Official behavior: settings.json doesn't pass --enable-audio; hooks decide internally.
     We therefore always set enabled=True here and rely on the AudioManager/config
     to resolve mapping/volume and Simple/legacy manager to handle platform nuances.
+
+    Throttling layers:
+    1. Global throttle: minimum 5s between ANY audio (prevents cross-event spam)
+    2. Event throttle: per-event throttle_key + throttle_window (prevents same-event spam)
     """
     if not audio_type:
         return
     try:
         am = _AM()
-        # Optional throttle: if provided by handler, honor it
+
+        # Layer 1: Global throttle - minimum interval between ANY audio
+        try:
+            if am.should_throttle_safe(_GLOBAL_THROTTLE_KEY, _GLOBAL_THROTTLE_SECONDS):
+                return  # Skip: too soon after last audio
+        except Exception:
+            pass
+
+        # Layer 2: Event-specific throttle (if provided by handler)
         if throttle_key and isinstance(throttle_window, int) and throttle_window > 0:
             try:
                 if am.should_throttle_safe(throttle_key, throttle_window):
                     return
             except Exception:
                 pass
+
         played, _path, _ctx = am.play_audio_safe(audio_type, enabled=True)
-        if played and throttle_key and isinstance(throttle_window, int) and throttle_window > 0:
+
+        if played:
+            # Mark global throttle
             try:
-                am.mark_emitted_safe(throttle_key)
+                am.mark_emitted_safe(_GLOBAL_THROTTLE_KEY)
             except Exception:
                 pass
+            # Mark event throttle
+            if throttle_key and isinstance(throttle_window, int) and throttle_window > 0:
+                try:
+                    am.mark_emitted_safe(throttle_key)
+                except Exception:
+                    pass
     except Exception:
         pass
 

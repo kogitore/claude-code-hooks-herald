@@ -6,6 +6,32 @@ Commit messages are recommended to follow [Conventional Commits](https://www.con
 
 ## [Unreleased]
 
+## [0.5.1-dev] - 2026-01-03
+### 🔇 Audio Notification Simplification
+
+Reduced audio notifications to only essential user-input-required events. See [ADR-0005](docs/adr/0005-audio-notification-simplification.md) for full details.
+
+#### Changed
+- **Simplified hooks**: Only `Stop` event triggers audio (task complete, awaiting user input)
+- **Global throttle**: Added 5-second minimum interval between ANY audio playback
+- **Reduced throttle**: Stop event reduced from 120s to 30s (global throttle handles rapid-fire)
+
+#### Removed (from active hooks)
+- `Notification` hook - informational only, no user action needed
+- `SubagentStop` hook - sub-task complete, doesn't need user attention
+- `SessionStart` / `SessionEnd` hooks - automatic events
+- `UserPromptSubmit` hook - user already engaged
+
+#### Files Modified
+- `.claude/herald/dispatcher.py` - Added global throttle mechanism
+- `.claude/settings.json` - Simplified to Stop-only hook
+- `.claude/herald/config/audio_config.json` - Minimal configuration
+
+#### How to Restore
+See [ADR-0005](docs/adr/0005-audio-notification-simplification.md) for restoration instructions.
+
+---
+
 ## [0.5.0-dev] - 2025-12-01
 ### 🚀 Architecture Modernization & Notion Integration
 
