@@ -12,23 +12,26 @@
 import { basename, join } from "path";
 import { readFileSync } from "fs";
 
-const NOTIFY_EVENTS = new Set(["Stop", "SubagentStop", "Notification", "SessionEnd"]);
+export const NOTIFY_EVENTS = new Set(["Stop", "SubagentStop", "Notification", "SessionEnd"]);
 
-const DEFAULT_MESSAGES: Record<string, string> = {
+export const DEFAULT_MESSAGES: Record<string, string> = {
   Stop: "Task completed",
   SubagentStop: "Sub-agent completed",
   Notification: "Notification received",
   SessionEnd: "Session ended",
 };
 
-let customMessages: Record<string, string> = {};
-try {
-  const configPath = join(import.meta.dir, "../config/messages.json");
-  const raw = JSON.parse(readFileSync(configPath, "utf-8"));
-  customMessages = raw.messages ?? {};
-} catch {
-  // Config not found or invalid — use defaults
+export function loadCustomMessages(configPath: string): Record<string, string> {
+  try {
+    const raw = JSON.parse(readFileSync(configPath, "utf-8"));
+    return raw.messages ?? {};
+  } catch {
+    return {};
+  }
 }
+
+const defaultConfigPath = join(import.meta.dir, "../config/messages.json");
+let customMessages = loadCustomMessages(defaultConfigPath);
 
 /** Get project name from cwd */
 function projectName(): string {
@@ -150,6 +153,6 @@ export function sendNotification(eventType: string, detail?: string): boolean {
   return false;
 }
 
-function formatEventMessage(eventType: string): string {
+export function formatEventMessage(eventType: string): string {
   return customMessages[eventType] ?? DEFAULT_MESSAGES[eventType] ?? eventType;
 }
