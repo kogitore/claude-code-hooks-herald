@@ -9,9 +9,26 @@
  * Only triggered on completion events: Stop, SubagentStop, Notification, SessionEnd.
  */
 
-import { basename } from "path";
+import { basename, join } from "path";
+import { readFileSync } from "fs";
 
 const NOTIFY_EVENTS = new Set(["Stop", "SubagentStop", "Notification", "SessionEnd"]);
+
+const DEFAULT_MESSAGES: Record<string, string> = {
+  Stop: "Task completed",
+  SubagentStop: "Sub-agent completed",
+  Notification: "Notification received",
+  SessionEnd: "Session ended",
+};
+
+let customMessages: Record<string, string> = {};
+try {
+  const configPath = join(import.meta.dir, "../config/messages.json");
+  const raw = JSON.parse(readFileSync(configPath, "utf-8"));
+  customMessages = raw.messages ?? {};
+} catch {
+  // Config not found or invalid — use defaults
+}
 
 /** Get project name from cwd */
 function projectName(): string {
@@ -134,16 +151,5 @@ export function sendNotification(eventType: string, detail?: string): boolean {
 }
 
 function formatEventMessage(eventType: string): string {
-  switch (eventType) {
-    case "Stop":
-      return "Task completed";
-    case "SubagentStop":
-      return "Sub-agent completed";
-    case "Notification":
-      return "Notification received";
-    case "SessionEnd":
-      return "Session ended";
-    default:
-      return eventType;
-  }
+  return customMessages[eventType] ?? DEFAULT_MESSAGES[eventType] ?? eventType;
 }

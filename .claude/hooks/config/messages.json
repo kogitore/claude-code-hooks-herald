@@ -1,0 +1,9 @@
+{
+  "locale": "zh-TW",
+  "messages": {
+    "Stop": "任務完成",
+    "SubagentStop": "子代理完成",
+    "Notification": "收到通知",
+    "SessionEnd": "工作階段結束"
+  }
+}
