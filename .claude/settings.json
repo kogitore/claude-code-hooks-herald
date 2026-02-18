@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook Notification"
+            "command": "bun run .claude/hooks/herald.ts --hook Notification"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook Stop"
+            "command": "bun run .claude/hooks/herald.ts --hook Stop"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook SubagentStop"
+            "command": "bun run .claude/hooks/herald.ts --hook SubagentStop"
           }
         ]
       }
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook PreToolUse"
+            "command": "bun run .claude/hooks/herald.ts --hook PreToolUse"
           }
         ]
       }
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook PostToolUse"
+            "command": "bun run .claude/hooks/herald.ts --hook PostToolUse"
           }
         ]
       }
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook SessionStart"
+            "command": "bun run .claude/hooks/herald.ts --hook SessionStart"
           }
         ]
       }
@@ -72,7 +72,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook SessionEnd"
+            "command": "bun run .claude/hooks/herald.ts --hook SessionEnd"
           }
         ]
       }
@@ -83,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run .claude/hooks/herald.py --hook UserPromptSubmit"
+            "command": "bun run .claude/hooks/herald.ts --hook UserPromptSubmit"
           }
         ]
       }

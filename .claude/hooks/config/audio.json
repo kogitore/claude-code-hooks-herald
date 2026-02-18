@@ -2,14 +2,14 @@
   "sound_files": {
     "base_path": "./.claude/sounds",
     "mappings": {
-      "Stop": "task_complete.wav",
-      "SubagentStop": "agent_complete.wav",
-      "Notification": "user_prompt.wav",
-      "PreToolUse": "user_prompt.wav",
-      "PostToolUse": "task_complete.wav",
-      "SessionStart": "user_prompt.wav",
-      "SessionEnd": "task_complete.wav",
-      "UserPromptSubmit": "user_prompt.wav"
+      "Stop": ["task_complete.wav"],
+      "SubagentStop": ["agent_complete.wav"],
+      "Notification": ["user_prompt.wav"],
+      "PreToolUse": ["user_prompt.wav"],
+      "PostToolUse": ["task_complete.wav"],
+      "SessionStart": ["user_prompt.wav"],
+      "SessionEnd": ["task_complete.wav"],
+      "UserPromptSubmit": ["user_prompt.wav"]
     }
   },
   "audio_settings": {
