@@ -7,7 +7,7 @@ import { join, dirname } from "path";
 import type { HookContext, HandlerResult } from "../lib/types";
 import { createResult } from "../lib/types";
 import { USER_PROMPT_SUBMIT } from "../lib/constants";
-import { getRepoRoot } from "../lib/session";
+import { getRepoRoot, getLogsRoot } from "../lib/session";
 
 const REPO_ROOT = getRepoRoot();
 const PROMPT_LOG_PATH = join(REPO_ROOT, "logs", "prompt_submissions.jsonl");
@@ -185,6 +185,13 @@ export function handleUserPromptSubmit(context: HookContext): HandlerResult {
   } else {
     hr.suppressAudio = true;
   }
+
+  // Record prompt timestamp for short-task suppression
+  try {
+    const dir = getLogsRoot();
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "last_prompt_at"), String(Date.now()));
+  } catch { /* silent */ }
 
   return hr;
 }

@@ -7,12 +7,15 @@
  *   bun run herald.ts toggle|pause|...     (CLI mode)
  */
 
+import { readFileSync } from "fs";
+import { join } from "path";
 import * as constants from "./lib/constants";
 import type { Handler, HookContext, HandlerResult } from "./lib/types";
-import { playAudio, shouldThrottle, markEmitted, getThrottleWindow } from "./lib/audio";
+import { playAudio, shouldThrottle, markEmitted, getThrottleWindow, getMinTaskDuration } from "./lib/audio";
 import { isMuted } from "./lib/cli";
 import { runCli } from "./lib/cli";
 import { sendNotification, setTabTitle } from "./lib/notify";
+import { getLogsRoot } from "./lib/session";
 
 // Handler imports
 import { handleNotification } from "./handlers/notification";
@@ -74,6 +77,33 @@ function doPlayAudio(
   }
 }
 
+const COMPLETION_EVENTS = new Set([
+  constants.STOP,
+  constants.SUBAGENT_STOP,
+  constants.SESSION_END,
+]);
+
+function isShortTask(event: string, payload: Record<string, unknown>): boolean {
+  const threshold = getMinTaskDuration();
+  if (threshold <= 0 || !COMPLETION_EVENTS.has(event)) return false;
+
+  // SessionEnd has payload.duration (seconds)
+  if (event === constants.SESSION_END) {
+    const d = Number(payload.duration);
+    return !isNaN(d) && d < threshold;
+  }
+
+  // Stop/SubagentStop: read last prompt timestamp
+  try {
+    const ts = Number(
+      readFileSync(join(getLogsRoot(), "last_prompt_at"), "utf-8").trim()
+    );
+    if (!isNaN(ts)) return (Date.now() - ts) / 1000 < threshold;
+  } catch { /* file missing = don't suppress */ }
+
+  return false;
+}
+
 function dispatch(event: string, payload: Record<string, unknown>): Record<string, unknown> {
   const handler = HANDLERS[event];
   if (!handler) return { continue: true };
@@ -89,6 +119,11 @@ function dispatch(event: string, payload: Record<string, unknown>): Record<strin
     result = handler(ctx);
   } catch {
     return { continue: true };
+  }
+
+  // Suppress completion notifications for short tasks
+  if (!result.suppressAudio && isShortTask(event, payload)) {
+    result.suppressAudio = true;
   }
 
   // Audio

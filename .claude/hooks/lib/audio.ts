@@ -240,6 +240,15 @@ export function getThrottleWindow(audioType: string): number {
   return throttle[audioType] ?? 0;
 }
 
+export function getMinTaskDuration(): number {
+  try {
+    const data = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+    return Number(data?.audio_settings?.min_task_duration_seconds) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function getVolume(): number {
   return loadConfig().volume;
 }

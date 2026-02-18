@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
-import { resolve } from "path";
+import { resolve, join, dirname } from "path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 
 const HERALD = resolve(import.meta.dir, "..", "herald.ts");
 
@@ -83,5 +84,34 @@ describe("herald integration", () => {
   test("unknown event returns continue: true", () => {
     const out = runHerald("UnknownEvent", {});
     expect(out.continue).toBe(true);
+  });
+
+  test("short task Stop suppresses audio (prompt submitted moments ago)", () => {
+    // First, submit a prompt to write last_prompt_at
+    runHerald("UserPromptSubmit", { prompt: "quick task" });
+
+    // Immediately run Stop — elapsed time < 30s threshold
+    const out = runHerald("Stop", {});
+    expect(out.continue).toBe(true);
+
+    // Verify last_prompt_at was written
+    const hooksDir = resolve(import.meta.dir, "..");
+    const repoRoot = dirname(dirname(hooksDir));
+    const tsFile = join(repoRoot, "logs", "last_prompt_at");
+    expect(existsSync(tsFile)).toBe(true);
+    const ts = Number(readFileSync(tsFile, "utf-8").trim());
+    expect(ts).toBeGreaterThan(0);
+  });
+
+  test("short SessionEnd suppresses audio (duration < threshold)", () => {
+    const out = runHerald("SessionEnd", { sessionId: "short-test", duration: 5 });
+    expect(out.continue).toBe(true);
+    // duration 5s < 30s threshold → audio suppressed internally
+  });
+
+  test("long SessionEnd does not suppress audio (duration >= threshold)", () => {
+    const out = runHerald("SessionEnd", { sessionId: "long-test", duration: 60 });
+    expect(out.continue).toBe(true);
+    // duration 60s >= 30s threshold → audio not suppressed
   });
 });

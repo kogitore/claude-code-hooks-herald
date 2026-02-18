@@ -14,6 +14,7 @@
   },
   "audio_settings": {
     "volume": 0.2,
+    "min_task_duration_seconds": 30,
     "throttle_seconds": {
       "Stop": 120,
       "SubagentStop": 120,
