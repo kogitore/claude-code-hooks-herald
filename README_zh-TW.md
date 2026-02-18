@@ -2,216 +2,235 @@
 
 [English](./README.md) | [繁體中文](./README_zh-TW.md)
 
-**Changelog:** see [CHANGELOG.md](./CHANGELOG.md) · **Design/Notes:** see [/updates](./updates/)
+**更新日誌：** 見 [CHANGELOG.md](./CHANGELOG.md) · **設計筆記：** 見 [/updates](./updates/)
 
 </div>
 
 > 本專案啟發自 [disler/claude-code-hooks-mastery](https://github.com/disler/claude-code-hooks-mastery)
 
-# Claude Code Hooks Herald
+# Herald Hooks
 
-Herald 為 Claude Code 提供單一入口的掛鉤系統：所有官方事件都導向 `.claude/hooks/herald.py`，統一處理音效播放、Decision API 安全策略與節流邏輯。
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 的統一 Hooks 調度器。透過單一 TypeScript 入口處理所有官方 hook 事件，提供本機音效回饋（含節流）、桌面通知，以及可設定的工具安全策略。
 
 ## 功能
 
-- 🛡️ **Herald Dispatcher**：單一入口支援 8/9 官方 Claude Code 事件（已實作8個，PreCompact待完成）。
-- 🧩 **BaseHook 共用框架**：統一驗證、節流、音效播放，讓各 hook 只需託管業務邏輯。
-- 🧠 **Decision API**：支援 Allow / Deny / Ask / BlockStop，並可透過 `decision_policy.json` 客製規則。
-- 🔔 **音效回饋**：播放本機 `.wav` 檔，不需 API Key 或網路存取。
-- ⏱️ **智慧節流**：依事件種類套用可調整的冷卻時間，避免音效轟炸。
-- ✅ **Claude Code 相容**：完整支援新舊兩種欄位格式（`tool_name`/`tool_input` 與 legacy 格式）。
+- **單一調度器** — 一個入口（`herald.ts`）處理全部 8 個已實作的 Claude Code 事件。
+- **Decision API** — 支援 Allow / Deny / Ask，透過 `decision-policy.json` 設定規則。
+- **音效回饋** — 本機 `.wav` 播放，依事件類型節流。支援多音效隨機選擇。
+- **桌面通知** — macOS / Linux / Windows，支援 i18n 訊息自訂。
+- **終端機標題** — 更新 Terminal / iTerm2 分頁標題，顯示目前事件狀態。
+- **Session 追蹤** — 檔案式狀態管理與 JSONL 事件紀錄。
+- **CLI 控制** — `toggle`、`pause`、`resume`、`status`、`preview` 指令。
+- **零依賴** — 僅使用 Bun 內建模組（`fs`、`path`、`child_process`）。
 
 ## 快速開始
 
 ### 系統需求
 
-**基本需求：**
-- **Claude Code CLI** - [安裝 Claude Code](https://claude.ai/code) (本 hooks 系統與 Claude Code 整合)
-- **Python 3.9+** (已測試 Python 3.11-3.13)
-- **uv** (超快速 Python 套件管理器) - [安裝 uv](https://docs.astral.sh/uv/getting-started/installation/)
-- **Git** (用於複製儲存庫)
-- **音效系統：**
-  - **macOS:** `afplay` (內建)
-  - **Linux:** `ffplay` (ffmpeg 套件) 或 `aplay` (alsa-utils)
-  - **Windows:** `winsound` (Python 內建)
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
+- [Bun](https://bun.sh/) 執行環境
 
-**安裝 uv (如尚未安裝)：**
+**音效系統（播放音效用）：**
+- **macOS：** `afplay`（內建）
+- **Linux：** `ffplay`（ffmpeg）或 `aplay`（alsa-utils）
+- **Windows：** PowerShell `[System.Media.SoundPlayer]`（內建）
+
+### 安裝
+
 ```bash
-# macOS/Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Windows
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# 替代方案: pipx install uv
+git clone https://github.com/user/herald-hooks.git
+cd herald-hooks
 ```
 
-### 設置步驟
+將 hook 設定複製到你的 Claude Code 專案：
 
-1. **複製並進入目錄：**
-   ```bash
-   git clone <repository-url>
-   cd claude-code-hooks-herald
-   ```
+```bash
+cp .claude/settings.json /path/to/your/project/.claude/settings.json
+```
 
-2. **放入音效檔：** 將 `.wav` 檔案放進 `.claude/sounds/`：
-   ```bash
-   # 必要的音效檔案：
-   # - task_complete.wav (Stop 事件用)
-   # - agent_complete.wav (SubagentStop 事件用)
-   # - user_prompt.wav (Notification 事件用)
-   ```
+> 或者，將 `.claude/settings.json` 中的 `hooks` 區段合併到你現有的設定檔。
 
-3. **確認設定：** `.claude/settings.json` 已預設將所有事件導向 `herald.py`。複製到你的 Claude 專案：
-   ```bash
-   cp .claude/settings.json /path/to/your/claude/project/.claude/
-   ```
+### 放入音效檔
 
-4. **設定執行權限：**
-   ```bash
-   chmod +x .claude/hooks/*.py
-   ```
+將 `.wav` 檔案放入 `.claude/sounds/`：
 
-5. **測試安裝：**
-   ```bash
-   # 測試 herald 系統
-   echo '{"message": "test"}' | uv run .claude/hooks/herald.py --hook Notification --enable-audio
+```
+.claude/sounds/
+├── task_complete.wav    # Stop / PostToolUse / SessionEnd
+├── agent_complete.wav   # SubagentStop
+└── user_prompt.wav      # Notification / PreToolUse / SessionStart / UserPromptSubmit
+```
 
-   # 測試安全政策
-   echo '{"tool": "bash", "toolInput": {"command": "rm -rf /"}}' | uv run .claude/hooks/herald.py --hook PreToolUse
-   ```
+詳細說明請見 `.claude/sounds/README.md`。
 
 ### 驗證
 
+```bash
+# 測試通知
+echo '{"message": "test"}' | bun run .claude/hooks/herald.ts --hook Notification
+
+# 測試安全策略（應被拒絕）
+echo '{"tool": "Bash", "input": {"command": "rm -rf /"}}' | bun run .claude/hooks/herald.ts --hook PreToolUse
+```
+
 **預期輸出：**
-- Notification 測試: `{"continue": true}` + 音效播放
-- 安全測試: `{"continue": false, "permissionDecision": "deny"}` (危險指令被阻擋)
-
-**疑難排解：**
-- **無音效：**
-  - 檢查 `.claude/sounds/` 目錄存在且有 `.wav` 檔案
-  - Linux: 安裝音效相依性: `sudo apt-get install ffmpeg` 或 `sudo apt-get install alsa-utils`
-- **權限錯誤：** 執行 `chmod +x .claude/hooks/*.py`
-- **Python/uv 找不到：** 確保兩者都在你的 `$PATH` 中
-- **Claude Code 偵測不到 hooks：** 驗證 `.claude/settings.json` 在專案根目錄
-- **"找不到模組" 錯誤：** 從儲存庫根目錄執行
-
-**平台特定注意事項：**
-- **Windows：** 某些防毒軟體可能標記 Python 腳本 - 將專案目錄加入排除清單
-- **Linux/WSL：** 確保音效驅動程式正確配置以進行音效播放
-- **macOS：** 如有提示，請授予 Terminal/Claude Code 麥克風/音效權限
+- Notification：`{"continue":true}` + 音效播放
+- 安全測試：`{"continue":false, ...}`（危險指令被阻擋）
 
 ## 設定
 
-### 音效對應
-
-音效設定由 `.claude/hooks/utils/audio_config.json` 管理：
+### 音效（`config/audio.json`）
 
 ```json
 {
-  "audio_settings": {
-    "enabled": true,
-    "mode": "audio_files",
-    "volume": 0.2
-  },
   "sound_files": {
     "base_path": "./.claude/sounds",
     "mappings": {
-      "stop": "task_complete.wav",
-      "agent_stop": "agent_complete.wav",
-      "subagent_stop": "agent_complete.wav",
-      "user_notification": "user_prompt.wav"
+      "Stop": ["task_complete.wav"],
+      "SubagentStop": ["agent_complete.wav"],
+      "Notification": ["user_prompt.wav"]
+    }
+  },
+  "audio_settings": {
+    "volume": 0.2,
+    "throttle_seconds": {
+      "Stop": 120,
+      "Notification": 30
     }
   }
 }
 ```
 
-### Decision Policy
+透過環境變數覆寫音效目錄：
 
-安全決策由 `.claude/hooks/utils/decision_policy.json` 定義，可在 `pre_tool_use.rules` 加入客製規則，或調整 `post_tool_use`、`stop` 行為，例如：
+```bash
+export CLAUDE_SOUNDS_DIR="/absolute/path/to/sounds"
+```
+
+### Decision Policy（`config/decision-policy.json`）
+
+PreToolUse / PostToolUse / Stop 事件的安全規則：
 
 ```json
 {
   "pre_tool_use": {
     "rules": [
       {
-        "type": "command",
         "action": "deny",
-        "pattern": "git\\s+reset\\s+--hard",
-        "reason": "執行前請再確認"
+        "pattern": "rm\\s+-rf\\s+/",
+        "reason": "危險命令：刪除根目錄",
+        "tags": ["system:dangerous"],
+        "severity": "critical"
+      },
+      {
+        "action": "ask",
+        "tags": ["git:destructive"],
+        "reason": "請確認是否需要清除所有修改",
+        "severity": "high"
       }
     ]
   }
 }
 ```
 
-使用者規則會附加在預設規則之後，預設安全守則仍會生效。
+**內建標籤：**
 
-**快速開始：** 將 `.claude/hooks/utils/decision_policy.example.json` 複製為 `decision_policy.json`，刪除不需要的區段後再調整 regex 與 reason。樣板涵蓋常見情境（封鎖 git reset、提示 sudo 安裝、保護憑證檔）且未命中規則時預設允許。完整指引請參考 [updates/decisions/0003-decision-policy-template_zh-TW.md](./updates/decisions/0003-decision-policy-template_zh-TW.md)。
+| 標籤 | 說明 | 嚴重度 |
+|------|------|--------|
+| `system:dangerous` | 破壞性指令（`rm -rf /`、`shutdown`） | critical |
+| `git:destructive` | 重設工作區的 Git 指令（`reset --hard`、`clean -fd`） | high |
+| `secrets:file` | 憑證檔案（`.env`、`id_rsa`、`*.pem`） | high |
+| `package:install` | 套件安裝（`npm install`、`pip install`） | medium |
+| `dependency:lock` | 鎖定檔（`package-lock.json`、`poetry.lock`） | medium |
 
-**內建標籤**（可於 `tags` 陣列直接使用）：
+### i18n 訊息（`config/messages.json`）
 
-- `system:dangerous` → 極高風險指令（`rm -rf /`、`shutdown`、`reboot`），預設嚴重度 `critical`。
-- `package:install` → 套件管理工具安裝/更新指令（`npm install`、`pip install`、`uv pip` 等），嚴重度 `medium`。
-- `git:destructive` → 可能清除工作區的 Git 指令（`git reset --hard`、`git clean -fd` 等），嚴重度 `high`。
-- `secrets:file` → 憑證或敏感設定檔案路徑（`.env`、`id_rsa`、`*.pem` 等），嚴重度 `high`。
-- `dependency:lock` → 依賴鎖定檔（`package-lock.json`、`poetry.lock`、`requirements.txt` 等），嚴重度 `medium`。
+自訂各語系的通知訊息：
 
-仍可同時保留自訂 regex，以結合專案特定規則；未知標籤會被忽略不會造成錯誤。
+```json
+{
+  "locale": "zh-TW",
+  "messages": {
+    "Stop": "任務完成",
+    "SubagentStop": "子代理完成",
+    "Notification": "收到通知",
+    "SessionEnd": "工作階段結束"
+  }
+}
+```
 
-## 音效檔
+## CLI
 
-請在 `.claude/sounds/` 放置下列 `.wav`：
+```bash
+bun run .claude/hooks/herald.ts toggle            # 切換靜音
+bun run .claude/hooks/herald.ts pause             # 靜音
+bun run .claude/hooks/herald.ts resume            # 取消靜音
+bun run .claude/hooks/herald.ts status            # 顯示目前狀態
+bun run .claude/hooks/herald.ts preview [event]   # 播放測試音效
+```
 
-- `task_complete.wav`：Stop 事件播放
-- `agent_complete.wav`：SubagentStop 事件播放
-- `user_prompt.wav`：Notification 事件播放
+## 支援事件
+
+| 事件 | 說明 |
+|------|------|
+| `Notification` | 一般通知 |
+| `Stop` | 任務完成 |
+| `SubagentStop` | 子代理完成 |
+| `PreToolUse` | 工具執行前安全檢查 |
+| `PostToolUse` | 工具執行後稽核 |
+| `UserPromptSubmit` | 提示詞驗證與頻率限制 |
+| `SessionStart` | Session 初始化與健康檢查 |
+| `SessionEnd` | 清理與狀態歸檔 |
+
+> `PreCompact` 已定義但尚未實作。
 
 ## 測試
 
-從專案根目錄執行 pytest（可用 uv 免安裝執行）：
-
-```
-# 方式 A：使用 uv 執行 pytest（無需安裝全域套件）
-uvx pytest -q .claude/hooks/tests
-
-# 方式 B：本機安裝後執行
-pip install -U pytest && pytest -q .claude/hooks/tests
+```bash
+bun test
 ```
 
-說明：
-- 測試預設以 `AUDIO_PLAYER_CMD=true` 模擬播放器成功，不需系統音效。
-- 整合測試會檢查 `.claude/settings.json` 是否指向 `herald.py`，並驗證 Decision Policy 的 deny/ask 邏輯。
+測試使用 `AUDIO_PLAYER_CMD=true`（空操作），不需要系統音效。
+
+## 專案結構
+
+```
+.claude/
+├── hooks/
+│   ├── herald.ts              # 主調度器
+│   ├── lib/                   # 核心函式庫
+│   │   ├── audio.ts           # 音效播放 + 節流
+│   │   ├── notify.ts          # 桌面通知 + 終端機標題
+│   │   ├── decision.ts        # 安全評估
+│   │   ├── cli.ts             # CLI 指令
+│   │   ├── session.ts         # Session 狀態 + 事件紀錄
+│   │   ├── constants.ts       # 事件類型常數
+│   │   └── types.ts           # 型別定義
+│   ├── handlers/              # 事件處理器
+│   ├── config/                # JSON 設定檔
+│   └── tests/                 # 測試套件
+├── sounds/                    # 音效檔案（.wav）
+├── logs/                      # 執行紀錄與 Session 資料
+└── settings.json              # Claude Code hook 路由設定
+```
+
+## 疑難排解
+
+| 問題 | 解決方法 |
+|------|----------|
+| 沒有音效 | 確認 `.claude/sounds/` 有 `.wav` 檔案 |
+| Linux 無音效 | `sudo apt-get install ffmpeg` 或 `alsa-utils` |
+| Hooks 未偵測到 | 確認 `.claude/settings.json` 在專案根目錄 |
+| 找不到 Bun | [安裝 Bun](https://bun.sh/) 並確認在 `$PATH` 中 |
+
+## 免責聲明
+
+本專案為獨立的社群驅動專案，**與 Anthropic, PBC 無任何關聯、背書或官方支援關係**。「Claude」與「Claude Code」為 Anthropic 的商標。本專案透過 Claude Code 的公開 [Hooks API](https://docs.anthropic.com/en/docs/claude-code/hooks) 進行整合。
 
 ## 授權
 
-MIT License（詳見 LICENSE）
+[MIT](./LICENSE)
 
 ## 致謝
 
-本專案受 Claude Code hook 系統範例及 [claude-code-hooks-mastery](https://github.com/disler/claude-code-hooks-mastery) 專案啟發。
-
-## 輸出與環境變數
-
-- JSON 單一輸出：每個 hook 僅輸出一段 JSON（例如 `{"continue": true}` 或 Decision API 回應）。
-- 音效路徑覆寫：以環境變數指定音效資料夾（優先於設定檔）
-  - `CLAUDE_SOUNDS_DIR` 或 `AUDIO_SOUNDS_DIR`
-  - 範例：
-
-```
-export CLAUDE_SOUNDS_DIR="/absolute/path/to/sounds"
-```
-
-## 常用指令範例
-
-- Dispatcher 測試（Notification）：
-
-```
-echo '{"message": "Hi"}' | uv run .claude/hooks/herald.py --hook Notification --enable-audio
-```
-
-- PreToolUse 安全檢查：
-
-```
-echo '{"tool": "bash", "toolInput": {"command": "rm -rf /"}}' | uv run .claude/hooks/herald.py --hook PreToolUse
-```
+本專案受 Claude Code hook 系統及 [claude-code-hooks-mastery](https://github.com/disler/claude-code-hooks-mastery) 專案啟發。
