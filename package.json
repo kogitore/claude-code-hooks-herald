@@ -1,0 +1,11 @@
+{
+  "name": "herald-hooks",
+  "private": true,
+  "scripts": {
+    "test": "bun test --cwd .claude/hooks/tests",
+    "herald": "bun run .claude/hooks/herald.ts",
+    "health": "bun run scripts/health-check.ts",
+    "validate": "bun run scripts/validate-config.ts",
+    "test:event": "bun run scripts/test-event.ts"
+  }
+}
